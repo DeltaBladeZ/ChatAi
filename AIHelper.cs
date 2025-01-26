@@ -40,232 +40,312 @@ namespace ChatAi
 
             LogMessage($"DEBUG: Selected backend: {backend}");
 
-            return backend switch
+            string responseText = string.Empty;
+
+            try
             {
-                "OpenAI" => await GetOpenAIResponse(prompt),
-                "KoboldCpp" => await GetKoboldCppResponse(prompt),
-                "LocalAI" => await GetLocalAIResponse(prompt),
-                "OpenRouter" => await GetOpenRouterResponse(prompt),
-                _ => "Error: Invalid AI backend selected."
-            };
+                switch (backend)
+                {
+                    case "OpenAI":
+                        responseText = await GetOpenAIResponse(prompt);
+                        break;
+                    case "KoboldCpp":
+                        responseText = await GetKoboldCppResponse(prompt);
+                        break;
+                    case "OpenRouter":
+                        responseText = await GetOpenRouterResponse(prompt);
+                        break;
+                    case "Ollama":
+                        responseText = await GetOllamaResponse(prompt);
+                        break;
+                    default:
+                        responseText = "Error: Invalid AI backend selected.";
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"DEBUG: Exception in GetResponse: {ex.Message}");
+                responseText = $"Error: {ex.Message}";
+            }
+
+            return responseText;
         }
 
         private static async Task<string> GetOpenRouterResponse(string prompt)
         {
-            try
+            string endpoint = "https://openrouter.ai/api/v1/chat/completions";
+
+            var settings = ChatAiSettings.Instance;
+            string apiKey = settings.OpenRouterAPIKey;
+            string model = settings.OpenRouterModel;
+            int maxTokens = settings.MaxTokens;
+
+            LogMessage($"DEBUG: OpenRouter Endpoint: {endpoint}");
+            LogMessage($"DEBUG: OpenRouter Model: {model}");
+            LogMessage($"DEBUG: OpenRouter Max Tokens: {maxTokens}");
+
+            if (string.IsNullOrWhiteSpace(apiKey))
             {
-                string endpoint = "https://openrouter.ai/api/v1/chat/completions"; // Hardcoded
-
-                // Fetch settings
-                var settings = ChatAiSettings.Instance;
-                string apiKey = settings.OpenRouterAPIKey;
-                string model = settings.OpenRouterModel; 
-                int maxTokens = settings.MaxTokens;
-
-                // Debug logs for settings
-                LogMessage($"DEBUG: OpenRouter Endpoint: {endpoint}");
-                LogMessage($"DEBUG: OpenRouter Model: {model}");
-                LogMessage($"DEBUG: OpenRouter Max Tokens: {maxTokens}");
-
-                if (string.IsNullOrWhiteSpace(apiKey))
-                {
-                    return "Error: OpenRouter API key is not set. Please configure it in the Mod Options menu.";
-                }
-
-                // Prepare the payload
-                var payload = new
-                {
-                    model = model,
-                    max_tokens = maxTokens,
-                    temperature = 0.7,
-                    messages = new[]
-                    {
-                new { role = "system", content = "You are a medieval NPC in a fantasy world. Stay in character and maintain a medieval tone." },
-                new { role = "user", content = prompt }
+                return "Error: OpenRouter API key is not set. Please configure it in the Mod Options menu.";
             }
-                };
 
-                var jsonPayload = JsonConvert.SerializeObject(payload);
-                LogMessage($"DEBUG: OpenRouter Payload: {jsonPayload}");
-
-                // Create HTTP request
-                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-                {
-                    Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
-                };
-
-                // Add headers
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-
-                // Optional leaderboard headers
-                if (!string.IsNullOrWhiteSpace("https://your-site-url.com"))
-                {
-                    request.Headers.Add("HTTP-Referer", "https://your-site-url.com");
-                }
-                if (!string.IsNullOrWhiteSpace("Your-Site-Name"))
-                {
-                    request.Headers.Add("X-Title", "Your-Site-Name");
-                }
-
-                // Send HTTP request
-                using var httpClient = new HttpClient();
-                var response = await httpClient.SendAsync(request);
-
-                LogMessage($"DEBUG: OpenRouter Response Status: {response.StatusCode}");
-
-                // Handle response
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorDetails = await response.Content.ReadAsStringAsync();
-                    LogMessage($"DEBUG: OpenRouter Error Response: {errorDetails}");
-                    InformationManager.DisplayMessage(new InformationMessage($"OpenRouter request failed with status {response.StatusCode}. Details: {errorDetails}"));
-                    return $"Error: OpenRouter request failed with status {response.StatusCode}. Details: {errorDetails}";
-                }
-
-                var responseBody = await response.Content.ReadAsStringAsync();
-                LogMessage($"DEBUG: OpenRouter Raw Response: {responseBody}");
-
-                var jsonResponse = JsonConvert.DeserializeObject<OpenAIResponse>(responseBody);
-
-                // Extract and return the response message
-                var responseMessage = jsonResponse?.choices?.FirstOrDefault()?.message?.content ?? "Error: No response received from OpenRouter.";
-                LogMessage($"DEBUG: OpenRouter Extracted Response: {responseMessage}");
-                return responseMessage;
-            }
-            catch (Exception ex)
+            var payload = new
             {
-                LogMessage($"DEBUG: Exception in GetOpenRouterResponse: {ex.Message}");
-                InformationManager.DisplayMessage(new InformationMessage($"Error: {ex.Message}"));
-                return $"Error: {ex.Message}";
+                model = model,
+                max_tokens = maxTokens,
+                temperature = 0.7,
+                messages = new[]
+                {
+                    new { role = "system", content = "You are a medieval NPC in a fantasy world. Stay in character and maintain a medieval tone." },
+                    new { role = "user", content = prompt }
+                }
+            };
+
+            var jsonPayload = JsonConvert.SerializeObject(payload);
+            LogMessage($"DEBUG: OpenRouter Payload: {jsonPayload}");
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+            };
+
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+            // Optional leaderboard headers - update these
+            if (!string.IsNullOrWhiteSpace("https://your-site-url.com"))
+            {
+                request.Headers.Add("HTTP-Referer", "https://your-site-url.com");
             }
+            if (!string.IsNullOrWhiteSpace("Your-Site-Name"))
+            {
+                request.Headers.Add("X-Title", "Your-Site-Name");
+            }
+
+            using var httpClient = new HttpClient();
+            var response = await httpClient.SendAsync(request);
+
+            LogMessage($"DEBUG: OpenRouter Response Status: {response.StatusCode}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorDetails = await response.Content.ReadAsStringAsync();
+                LogMessage($"DEBUG: OpenRouter Error Response: {errorDetails}");
+                InformationManager.DisplayMessage(new InformationMessage($"OpenRouter request failed with status {response.StatusCode}. Details: {errorDetails}"));
+                return $"Error: OpenRouter request failed with status {response.StatusCode}. Details: {errorDetails}";
+            }
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+            LogMessage($"DEBUG: OpenRouter Raw Response: {responseBody}");
+
+            var jsonResponse = JsonConvert.DeserializeObject<ApiResponse>(responseBody);
+
+            return jsonResponse?.choices?.FirstOrDefault()?.message?.content ?? "Error: No response received from OpenRouter.";
         }
 
 
         private static async Task<string> GetOpenAIResponse(string prompt)
         {
-            try
+            var settings = ChatAiSettings.Instance;
+            string apiKey = settings.OpenAIAPIKey;
+            string model = settings.OpenAIModel.SelectedValue;
+            int maxTokens = settings.MaxTokens;
+
+            LogMessage($"DEBUG: OpenAI Model: {model}");
+            LogMessage($"DEBUG: OpenAI Max Tokens: {maxTokens}");
+
+            if (string.IsNullOrWhiteSpace(apiKey))
             {
-                var settings = ChatAiSettings.Instance;
-                string apiKey = settings.OpenAIAPIKey;
-                string model = settings.OpenAIModel.SelectedValue;
-                int maxTokens = settings.MaxTokens;
-
-                LogMessage($"DEBUG: OpenAI Model: {model}");
-                LogMessage($"DEBUG: OpenAI Max Tokens: {maxTokens}");
-
-                if (string.IsNullOrWhiteSpace(apiKey))
-                {
-                    InformationManager.DisplayMessage(new InformationMessage("OpenAI API key is not set. Please configure it in the Mod Options menu."));
-                    return "Error: OpenAI API key is not set. Please configure it in the Mod Options menu.";
-                }
-
-                // Prepare payload
-                var payload = new
-                {
-                    model = model,
-                    max_tokens = maxTokens,
-                    temperature = 0.7,
-                    messages = new[]
-                    {
-                        new { role = "system", content = "You are a medieval NPC in a fantasy world. Stay in character and maintain a medieval tone." },
-                        new { role = "user", content = prompt }
-                    }
-                };
-
-                var jsonPayload = JsonConvert.SerializeObject(payload);
-                LogMessage($"DEBUG: OpenAI Payload: {jsonPayload}");
-
-                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-
-                using var httpClient = new HttpClient();
-                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-
-                var response = await httpClient.PostAsync("https://api.openai.com/v1/chat/completions", content);
-
-                LogMessage($"DEBUG: OpenAI Response Status: {response.StatusCode}");
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorDetails = await response.Content.ReadAsStringAsync();
-                    LogMessage($"DEBUG: OpenAI Error Response: {errorDetails}");
-                    InformationManager.DisplayMessage(new InformationMessage($"OpenAI request failed with status {response.StatusCode}. Details: {errorDetails}"));
-                    return $"Error: OpenAI request failed with status {response.StatusCode}. Details: {errorDetails}";
-                }
-
-                var responseBody = await response.Content.ReadAsStringAsync();
-                LogMessage($"DEBUG: OpenAI Raw Response: {responseBody}");
-
-                var jsonResponse = JsonConvert.DeserializeObject<OpenAIResponse>(responseBody);
-
-                var responseMessage = jsonResponse?.choices?.FirstOrDefault()?.message?.content ?? "Error: No response received from OpenAI.";
-                LogMessage($"DEBUG: OpenAI Extracted Response: {responseMessage}");
-                return responseMessage;
+                InformationManager.DisplayMessage(new InformationMessage("OpenAI API key is not set. Please configure it in the Mod Options menu."));
+                return "Error: OpenAI API key is not set. Please configure it in the Mod Options menu.";
             }
-            catch (Exception ex)
+
+            var payload = new
             {
-                LogMessage($"DEBUG: Exception in GetOpenAIResponse: {ex.Message}");
-                InformationManager.DisplayMessage(new InformationMessage($"Error: {ex.Message}"));
-                return $"Error: {ex.Message}";
+                model = model,
+                max_tokens = maxTokens,
+                temperature = 0.7,
+                messages = new[]
+                {
+                    new { role = "system", content = "You are a medieval NPC in a fantasy world. Stay in character and maintain a medieval tone." },
+                    new { role = "user", content = prompt }
+                }
+            };
+
+            var jsonPayload = JsonConvert.SerializeObject(payload);
+            LogMessage($"DEBUG: OpenAI Payload: {jsonPayload}");
+
+            var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await httpClient.PostAsync("https://api.openai.com/v1/chat/completions", content);
+
+            LogMessage($"DEBUG: OpenAI Response Status: {response.StatusCode}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorDetails = await response.Content.ReadAsStringAsync();
+                LogMessage($"DEBUG: OpenAI Error Response: {errorDetails}");
+                InformationManager.DisplayMessage(new InformationMessage($"OpenAI request failed with status {response.StatusCode}. Details: {errorDetails}"));
+                return $"Error: OpenAI request failed with status {response.StatusCode}. Details: {errorDetails}";
             }
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+            LogMessage($"DEBUG: OpenAI Raw Response: {responseBody}");
+
+            var jsonResponse = JsonConvert.DeserializeObject<ApiResponse>(responseBody);
+
+            return jsonResponse?.choices?.FirstOrDefault()?.message?.content ?? "Error: No response received from OpenAI.";
         }
 
         private static async Task<string> GetKoboldCppResponse(string prompt)
         {
+            var settings = ChatAiSettings.Instance;
+            string localModelUrl = settings.LocalModelURL;
+            int maxTokens = settings.MaxTokens;
+
+            LogMessage($"DEBUG: KoboldCpp URL: {localModelUrl}");
+
+            var payload = new
+            {
+                prompt = prompt,
+                temperature = 0.7,
+                max_new_tokens = maxTokens,
+                top_p = 0.9, // Nucleus sampling
+                stop_sequence = new[] { "\n\n" }
+            };
+
+            var jsonPayload = JsonConvert.SerializeObject(payload);
+            LogMessage($"DEBUG: KoboldCpp Payload: {jsonPayload}");
+
+            var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+            using var httpClient = new HttpClient();
+            var response = await httpClient.PostAsync(localModelUrl, content);
+
+            LogMessage($"DEBUG: KoboldCpp Response Status: {response.StatusCode}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorDetails = await response.Content.ReadAsStringAsync();
+                LogMessage($"DEBUG: KoboldCpp Error Response: {errorDetails}");
+                return $"Error: KoboldCpp request failed with status {response.StatusCode}. Details: {errorDetails}";
+            }
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+            LogMessage($"DEBUG: KoboldCpp Raw Response: {responseBody}");
+
+            var jsonResponse = JsonConvert.DeserializeObject<KoboldCppResponse>(responseBody);
+
+            return jsonResponse?.results?.FirstOrDefault()?.text ?? "Error: No response received from KoboldCpp.";
+        }
+
+
+        private static async Task<string> GetOllamaResponse(string prompt)
+        {
             try
             {
                 var settings = ChatAiSettings.Instance;
-                string localModelUrl = settings.LocalModelURL;
-                int maxTokens = settings.MaxTokens;
+                string ollamaBaseUrl = settings.OllamaURL;
+                string model = settings.OllamaModel;
 
+                LogMessage($"DEBUG: Ollama Base URL: {ollamaBaseUrl}");
+                LogMessage($"DEBUG: Ollama Model: {model}");
 
-                
+                // Construct the full URL. The /api/chat will be added from settings
+                string ollamaEndpoint = $"{ollamaBaseUrl}";
 
-                LogMessage($"DEBUG: KoboldCpp URL: {localModelUrl}");
-
+                // Prepare the payload with the messages array
                 var payload = new
                 {
-                    prompt = prompt,
-                    temperature = 0.7,
-                    max_new_tokens = maxTokens,
-                    top_p = 0.9, // Nucleus sampling
-                    stop_sequence = new[] { "\n\n" }
+                    model = model,
+                    messages = new[]
+                    {
+                        new { role = "user", content = prompt }
+                    }
+                    // ... other Ollama parameters if needed ...
                 };
 
                 var jsonPayload = JsonConvert.SerializeObject(payload);
-                LogMessage($"DEBUG: KoboldCpp Payload: {jsonPayload}");
+                LogMessage($"DEBUG: Ollama Payload: {jsonPayload}");
 
                 var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
                 using var httpClient = new HttpClient();
-                var response = await httpClient.PostAsync(localModelUrl, content);
+                using var response = await httpClient.PostAsync(ollamaEndpoint, content);
 
-                LogMessage($"DEBUG: KoboldCpp Response Status: {response.StatusCode}");
+                LogMessage($"DEBUG: Ollama Response Status: {response.StatusCode}");
 
                 if (!response.IsSuccessStatusCode)
                 {
                     var errorDetails = await response.Content.ReadAsStringAsync();
-                    LogMessage($"DEBUG: KoboldCpp Error Response: {errorDetails}");
-                    return $"Error: KoboldCpp request failed with status {response.StatusCode}. Details: {errorDetails}";
+                    LogMessage($"DEBUG: Ollama Error Response: {errorDetails}");
+                    return $"Error: Ollama request failed with status {response.StatusCode}. Details: {errorDetails}";
                 }
 
-                var responseBody = await response.Content.ReadAsStringAsync();
-                LogMessage($"DEBUG: KoboldCpp Raw Response: {responseBody}");
+                // --- Handle Streaming Responses (NDJSON) ---
+                response.EnsureSuccessStatusCode();
 
-                var jsonResponse = JsonConvert.DeserializeObject<KoboldCppResponse>(responseBody);
+                string fullResponse = "";
+                using var stream = await response.Content.ReadAsStreamAsync();
+                using var reader = new StreamReader(stream);
 
-                var responseMessage = jsonResponse?.results?.FirstOrDefault()?.text ?? "Error: No response received from KoboldCpp.";
-                LogMessage($"DEBUG: KoboldCpp Extracted Response: {responseMessage}");
-                return responseMessage;
+                while (!reader.EndOfStream)
+                {
+                    string line = await reader.ReadLineAsync();
+                    if (!string.IsNullOrEmpty(line))
+                    {
+                        // Deserialize each line as an OllamaResponseChunk
+                        var chunk = JsonConvert.DeserializeObject<OllamaResponseChunk>(line);
+                        fullResponse += chunk.message.content; // Append the 'content' from each chunk
+                    }
+                }
+
+                LogMessage($"DEBUG: Ollama Full Response: {fullResponse}");
+                return fullResponse;
+
             }
             catch (Exception ex)
             {
-                LogMessage($"DEBUG: Exception in GetKoboldCppResponse: {ex.Message}");
+                LogMessage($"DEBUG: Exception in GetOllamaResponse: {ex.Message}");
                 return $"Error: {ex.Message}";
             }
         }
 
+        // Define the class to deserialize Ollama's response chunks
+        public class OllamaResponseChunk
+        {
+            public string model { get; set; }
+            public string created_at { get; set; }
+            public OllamaMessage message { get; set; }
+            public string done_reason { get; set; }
+            public bool done { get; set; }
+        }
 
-        // Response class for KoboldCpp
+        public class OllamaMessage
+        {
+            public string role { get; set; }
+            public string content { get; set; }
+        }
+
+        public class ApiResponse
+        {
+            public Choice[] choices { get; set; } = Array.Empty<Choice>();
+        }
+
+        public class Choice
+        {
+            public Message message { get; set; } = new Message();
+        }
+
+        public class Message
+        {
+            public string role { get; set; } = string.Empty;
+            public string content { get; set; } = string.Empty;
+        }
+
         public class KoboldCppResponse
         {
             public Result[] results { get; set; } = Array.Empty<Result>();
@@ -280,67 +360,5 @@ namespace ChatAi
         }
 
 
-        private static async Task<string> GetLocalAIResponse(string prompt)
-        {
-            try
-            {
-                var settings = ChatAiSettings.Instance;
-                string localAIUrl = settings.LocalAIUrl;
-
-                LogMessage($"DEBUG: LocalAI URL: {localAIUrl}");
-
-                var payload = new
-                {
-                    model = "llama-7b",
-                    max_tokens = 500,
-                    temperature = 0.7,
-                    messages = new[]
-                    {
-                        new { role = "system", content = "You are a medieval NPC in a fantasy world." },
-                        new { role = "user", content = prompt }
-                    }
-                };
-
-                var jsonPayload = JsonConvert.SerializeObject(payload);
-                LogMessage($"DEBUG: LocalAI Payload: {jsonPayload}");
-
-                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-
-                using var httpClient = new HttpClient();
-                var response = await httpClient.PostAsync(localAIUrl, content);
-
-                LogMessage($"DEBUG: LocalAI Response Status: {response.StatusCode}");
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorDetails = await response.Content.ReadAsStringAsync();
-                    LogMessage($"DEBUG: LocalAI Error Response: {errorDetails}");
-                    InformationManager.DisplayMessage(new InformationMessage($"LocalAI request failed with status {response.StatusCode}. Details: {errorDetails}"));
-                    return $"Error: LocalAI request failed with status {response.StatusCode}. Details: {errorDetails}";
-                }
-
-                var responseBody = await response.Content.ReadAsStringAsync();
-                LogMessage($"DEBUG: LocalAI Raw Response: {responseBody}");
-
-                var jsonResponse = JsonConvert.DeserializeObject<OpenAIResponse>(responseBody);
-
-                var responseMessage = jsonResponse?.choices?.FirstOrDefault()?.message?.content ?? "Error: No response received from LocalAI.";
-                LogMessage($"DEBUG: LocalAI Extracted Response: {responseMessage}");
-                return responseMessage;
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"DEBUG: Exception in GetLocalAIResponse: {ex.Message}");
-                InformationManager.DisplayMessage(new InformationMessage($"Error: {ex.Message}"));
-                return $"Error: {ex.Message}";
-            }
-        }
     }
-
-    public class LocalModelResponse
-    {
-        public string content { get; set; } = string.Empty;
-    }
-
-
 }

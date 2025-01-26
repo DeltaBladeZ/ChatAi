@@ -39,7 +39,7 @@ namespace ChatAi
                 LogMessage("All Detected Modules:");
                 foreach (var module in allModules)
                 {
-                    LogMessage($"- {module.Name} (IsSelected: {module.IsSelected})");
+                    LogMessage($"- {module.Name}");
                 }
             }
             catch (Exception ex)

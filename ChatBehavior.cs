@@ -13,12 +13,18 @@ using Newtonsoft.Json;
 using System.Reflection;
 using TaleWorlds.CampaignSystem.Issues;
 using ChatAi.Quests;
+using TaleWorlds.Engine.GauntletUI;
+using TaleWorlds.ScreenSystem;
+
+
 
 
 namespace ChatAi
 {
     public class ChatBehavior : CampaignBehaviorBase
     {
+
+
 
 
         private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
@@ -386,7 +392,9 @@ namespace ChatAi
                     null,
                     async () =>
                     {
+     
                         await HandlePlayerInput();
+
 
                     }
                 );
@@ -415,7 +423,13 @@ namespace ChatAi
                     () =>
                     {
                         LogMessage("Player clicked to continue the conversation and hear the NPC's response.");
-                        AzureTextToSpeech.PlayDeferredAudio(); // Use static method
+                        //check if azure is the backend selected in chatAi settings
+                        if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Azure")
+                        LogMessage("Azure TTS selected. Playing deferred audio.");
+                        {
+                            AzureTextToSpeech.PlayDeferredAudio(); // Use static method
+                        }
+
                     }
 
                 );
@@ -430,8 +444,10 @@ namespace ChatAi
                     null,
                     () =>
                     {
-                        LogMessage("Player ended the conversation. Cancelling playback...");
-                        AzureTextToSpeech.CancelPlayback();
+                        if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Azure")
+                            LogMessage("Player ended the conversation. Cancelling playback...");
+                            AzureTextToSpeech.CancelPlayback();
+                        
 
                     }
                 );
@@ -502,9 +518,22 @@ namespace ChatAi
             await tts.GenerateSpeech(text, npc.IsFemale); // Pass gender to TTS
         }
 
+
+
         private async Task HandlePlayerInput()
         {
-            string userInput = await TextInput("Type your message to the NPC:");
+
+            // Fetch the player's input
+            string userInput = await TextInput("Type your message to the NPC");
+            if (userInput != null) {
+                userInput = userInput.Trim();
+            }
+
+
+
+
+
+            LogMessage($"DEBUG: Player input received: {userInput}");
 
             if (string.IsNullOrWhiteSpace(userInput))
             {
@@ -602,7 +631,6 @@ namespace ChatAi
                     LogMessage($"DEBUG: No active quests available to accept for NPC {npc.Name}.");
                 }
             }
-
 
             InformationManager.DisplayMessage(new InformationMessage("I am ready to respond now!"));
         }
