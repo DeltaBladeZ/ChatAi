@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using TaleWorlds.Library;
+using TaleWorlds.LinQuick;
 
 namespace ChatAi
 {
@@ -19,13 +20,34 @@ namespace ChatAi
         {
             try
             {
+                // Check if debug logging is enabled in the settings
                 if (!ChatAiSettings.Instance.EnableDebugLogging)
                 {
-                    return;
+                    return; // Skip logging if disabled
                 }
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Determine the log file path dynamically
+                string logFilePath = _logFilePath; // Default path
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                if (!Directory.Exists(logDirectory))
+                {
+                    // If the directory does not exist, fall back to the desktop
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
+
+                    if (!Directory.Exists(desktopLogDirectory))
+                    {
+                        Directory.CreateDirectory(desktopLogDirectory);
+                    }
+
+                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {
@@ -204,9 +226,11 @@ namespace ChatAi
         {
             var settings = ChatAiSettings.Instance;
             string localModelUrl = settings.LocalModelURL;
+            string model = settings.KoboldCppModel;  // Get the specified model name
             int maxTokens = settings.MaxTokens;
 
             LogMessage($"DEBUG: KoboldCpp URL: {localModelUrl}");
+            LogMessage($"DEBUG: KoboldCpp Model: {model}");
 
             var payload = new
             {
@@ -214,7 +238,8 @@ namespace ChatAi
                 temperature = 0.7,
                 max_new_tokens = maxTokens,
                 top_p = 0.9, // Nucleus sampling
-                stop_sequence = new[] { "\n\n" }
+                stop_sequence = new[] { "" } // Removes stop sequence
+
             };
 
             var jsonPayload = JsonConvert.SerializeObject(payload);
@@ -237,10 +262,17 @@ namespace ChatAi
             var responseBody = await response.Content.ReadAsStringAsync();
             LogMessage($"DEBUG: KoboldCpp Raw Response: {responseBody}");
 
+            // If DeepSeek is being used, clean the response
+            if (model.IndexOf("deepseek", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                responseBody = CleanDeepSeekResponse(responseBody);
+            }
+
             var jsonResponse = JsonConvert.DeserializeObject<KoboldCppResponse>(responseBody);
 
             return jsonResponse?.results?.FirstOrDefault()?.text ?? "Error: No response received from KoboldCpp.";
         }
+
 
 
         private static async Task<string> GetOllamaResponse(string prompt)
@@ -249,23 +281,20 @@ namespace ChatAi
             {
                 var settings = ChatAiSettings.Instance;
                 string ollamaBaseUrl = settings.OllamaURL;
-                string model = settings.OllamaModel;
+                string model = settings.OllamaModel;  // Get selected Ollama model
 
                 LogMessage($"DEBUG: Ollama Base URL: {ollamaBaseUrl}");
                 LogMessage($"DEBUG: Ollama Model: {model}");
 
-                // Construct the full URL. The /api/chat will be added from settings
                 string ollamaEndpoint = $"{ollamaBaseUrl}";
 
-                // Prepare the payload with the messages array
                 var payload = new
                 {
                     model = model,
                     messages = new[]
                     {
-                        new { role = "user", content = prompt }
-                    }
-                    // ... other Ollama parameters if needed ...
+                new { role = "user", content = prompt }
+            }
                 };
 
                 var jsonPayload = JsonConvert.SerializeObject(payload);
@@ -285,9 +314,6 @@ namespace ChatAi
                     return $"Error: Ollama request failed with status {response.StatusCode}. Details: {errorDetails}";
                 }
 
-                // --- Handle Streaming Responses (NDJSON) ---
-                response.EnsureSuccessStatusCode();
-
                 string fullResponse = "";
                 using var stream = await response.Content.ReadAsStreamAsync();
                 using var reader = new StreamReader(stream);
@@ -297,15 +323,20 @@ namespace ChatAi
                     string line = await reader.ReadLineAsync();
                     if (!string.IsNullOrEmpty(line))
                     {
-                        // Deserialize each line as an OllamaResponseChunk
                         var chunk = JsonConvert.DeserializeObject<OllamaResponseChunk>(line);
-                        fullResponse += chunk.message.content; // Append the 'content' from each chunk
+                        fullResponse += chunk.message.content;
                     }
                 }
 
                 LogMessage($"DEBUG: Ollama Full Response: {fullResponse}");
-                return fullResponse;
 
+                // If DeepSeek is being used, clean the response
+                if (model.IndexOf("deepseek", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    fullResponse = CleanDeepSeekResponse(fullResponse);
+                }
+
+                return fullResponse;
             }
             catch (Exception ex)
             {
@@ -313,6 +344,30 @@ namespace ChatAi
                 return $"Error: {ex.Message}";
             }
         }
+
+
+
+        private static string CleanDeepSeekResponse(string rawResponse)
+        {
+            // Find the last occurrence of "</think>" to extract the final response
+            int lastThinkEndIndex = rawResponse.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
+
+            if (lastThinkEndIndex != -1)
+            {
+                // Extract everything after the last "</think>" tag
+                string cleanedResponse = rawResponse.Substring(lastThinkEndIndex + "</think>".Length).Trim();
+
+                LogMessage($"DEBUG: Cleaned DeepSeek Response: {cleanedResponse}");
+
+                return cleanedResponse;
+            }
+
+            // If no "</think>" tag is found, return the full response as fallback
+            return rawResponse.Trim();
+        }
+
+
+
 
         // Define the class to deserialize Ollama's response chunks
         public class OllamaResponseChunk

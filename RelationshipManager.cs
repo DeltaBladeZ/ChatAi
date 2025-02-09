@@ -12,58 +12,43 @@ namespace ChatAi
     {
         private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
 
-        // Relationship modifiers (default values, overridden by settings)
-        private readonly Dictionary<string, int> _relationshipModifiers = new()
-        {
-            { "insult", -5 },
-            { "compliment", 1 },
-            { "neutral", 0 },
-            { "praise", 3 },
-            { "thank", 2 },
-            { "challenge", -10 },
-        };
+
 
         public async Task<int> UpdateRelationshipBasedOnMessage(Hero npc, string playerInput)
         {
+            LogMessage("============================================================");
+            LogMessage("Relationship Manager Starting.");
+            LogMessage("============================================================");
             try
             {
-                // Analyze the intent of the player's message
-                string intent = await AnalyzeIntent(playerInput);
-                LogMessage($"DEBUG: Relationship intent for NPC {npc.Name}: {intent}");
+                int relationshipChange = await AnalyzeIntent(playerInput);
+                LogMessage($"DEBUG: Relationship change for NPC {npc.Name}: {relationshipChange}");
 
-                // Get relationship modifier from settings or default
-                int relationshipChange = _relationshipModifiers.ContainsKey(intent)
-                    ? _relationshipModifiers[intent]
-                    : 0;
-
-                // Dynamically adjust values from settings
                 relationshipChange = AdjustRelationshipChange(relationshipChange);
 
                 if (relationshipChange != 0)
                 {
-                    // Update relationship
                     int currentRelation = (int)Math.Round(npc.GetRelationWithPlayer());
                     int newRelation = currentRelation + relationshipChange;
 
-                    // Apply cap from settings
                     int relationCap = ChatAiSettings.Instance.MaxRelationshipChange;
                     if (newRelation > relationCap)
                     {
-                        relationshipChange = relationCap - currentRelation; // Adjust change to hit the cap
+                        relationshipChange = relationCap - currentRelation;
                         newRelation = relationCap;
                     }
 
                     CharacterRelationManager.SetHeroRelation(Hero.MainHero, npc, newRelation);
 
-                    // Optionally update the clan leader's relation
                     if (ChatAiSettings.Instance.EnableRelationshipTracking && npc.Clan?.Leader != null && npc != npc.Clan.Leader)
                     {
                         CharacterRelationManager.SetHeroRelation(Hero.MainHero, npc.Clan.Leader, newRelation);
                     }
 
-                    // Output relationship change
-                    RelationshipOutput(relationshipChange, newRelation, npc.Name.ToString());
+                    // Store the last relationship change globally
+                    RelationshipTracker.SetRelationshipChange(npc, relationshipChange);
 
+                    RelationshipOutput(relationshipChange, newRelation, npc.Name.ToString());
                     return relationshipChange;
                 }
 
@@ -76,6 +61,9 @@ namespace ChatAi
                 return 0;
             }
         }
+
+
+
 
         private int AdjustRelationshipChange(int baseChange)
         {
@@ -125,14 +113,40 @@ namespace ChatAi
             }
         }
 
-        private async Task<string> AnalyzeIntent(string playerInput)
+        private async Task<int> AnalyzeIntent(string playerInput)
         {
-            string prompt = $"The player said: '{playerInput}'. Classify the message as one of the following: [insult, compliment, neutral, praise, thank, challenge]. Only return the classification.";
+            // New AI prompt: Instead of returning categories, it returns a direct numerical change
+            string prompt = $"Analyze the following message for sentiment impact on an NPC relationship. Assign a numerical score based on the player's words: \n\n" +
+                            $"Message: \"{playerInput}\"\n\n" +
+                            $"Guidelines:\n" +
+                            $"- Very offensive messages (curses, insults, threats) → return -10\n" +
+                            $"- Insults or dismissive comments → return between -5 and -9\n" +
+                            $"- Neutral/indifferent messages → return 0\n" +
+                            $"- Positive but not impactful (small talk, polite words) → return between +1 and +2\n" +
+                            $"- Warm interactions (thank you, friendly gesture, slight praise) → return between +3 and +4\n" +
+                            $"- Highly positive interactions (deep praise, expressing trust, loyalty) → return between +5 and +10\n\n" +
+                            $"Return ONLY the number, without any additional text. If the message is just a question or normal talking message return 0." +
+                            $"Examples: Player says 'I hate you' → return -10, Player says how are you? → return 0, Player says 'You are a good friend' → return +5, Player says 'Tell me about yourself' → return +0";
+
             LogMessage($"DEBUG: Calling AIHelper.GetResponse for RelationshipManager with prompt: {prompt}");
+
             string response = await AIHelper.GetResponse(prompt);
             LogMessage($"DEBUG: Intent analysis result: {response}");
-            return response.Trim().ToLower();
+
+            LogMessage("============================================================");
+            LogMessage("Relationship Manager Completed.");
+            LogMessage("============================================================");
+
+            // Ensure AI returns a valid integer, fallback to 0 if invalid
+            if (int.TryParse(response.Trim(), out int result))
+            {
+                return result;
+            }
+
+            LogMessage("WARNING: AI response was not a valid integer. Defaulting to 0.");
+            return 0;
         }
+
 
         private void LogMessage(string message)
         {
@@ -145,7 +159,27 @@ namespace ChatAi
                 }
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Determine the log file path dynamically
+                string logFilePath = _logFilePath; // Default path
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                if (!Directory.Exists(logDirectory))
+                {
+                    // If the directory does not exist, fall back to the desktop
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
+
+                    if (!Directory.Exists(desktopLogDirectory))
+                    {
+                        Directory.CreateDirectory(desktopLogDirectory);
+                    }
+
+                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {

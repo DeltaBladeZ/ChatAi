@@ -19,6 +19,7 @@ namespace ChatAi
                 chatBehavior.AddDialogs(campaignStarter);
                 DebugModLogger modLogger = new DebugModLogger();
                 modLogger.LogAllModules();
+                modLogger.LogAllSettings();
             }
         }
 

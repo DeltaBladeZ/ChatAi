@@ -69,7 +69,7 @@ namespace ChatAi
         {
             try
             {
-                return JsonConvert.SerializeObject(_npcContexts);
+                return JsonConvert.SerializeObject(_npcContexts, Formatting.Indented);
             }
             catch (Exception ex)
             {
@@ -77,6 +77,7 @@ namespace ChatAi
                 return string.Empty;
             }
         }
+
         private void DeserializeNPCContexts(string serializedData)
         {
             try
@@ -87,9 +88,10 @@ namespace ChatAi
             catch (Exception ex)
             {
                 LogMessage($"Error deserializing NPC contexts: {ex.Message}");
-                _npcContexts = new Dictionary<string, NPCContext>(); // Fallback to empty if deserialization fails
+                _npcContexts = new Dictionary<string, NPCContext>();
             }
         }
+
 
         private string GetCurrentDate()
         {
@@ -271,19 +273,42 @@ namespace ChatAi
             foreach (var stat in context.GetAllStats())
             {
                 prompt += $"\n{stat.Key}: {stat.Value}\n";
+
             }
 
-            // Add quest details
-            var questManager = new QuestManager();
-            string questDetails = questManager.GetQuestDetailsForPrompt(npc);
-            if (!string.IsNullOrWhiteSpace(questDetails))
+            // Retrieve and include relationship change feedback
+            int lastRelationshipChange = RelationshipTracker.GetRelationshipChange(npc);
+            if (lastRelationshipChange != 0)
             {
-                prompt += $"\n{questDetails}\n";
+                string relationshipFeedback = lastRelationshipChange > 0
+                    ? $"You liked the player's last message, and your relationship with them has improved by {lastRelationshipChange}."
+                    : $"You did not like the player's last message, and your relationship with them has worsened by {Math.Abs(lastRelationshipChange)}.";
+
+                prompt += $"\n\n{relationshipFeedback}\n";
             }
 
-            // Check for quest conditions and add failure reason if applicable
-            var escortHandler = new EscortMerchantCaravanHandler();
-            var quests = questManager.GetQuestsForNPC(npc);
+            // fetch the quest details toggled true for on and false for off
+            bool questDetailsEnabled = ChatAiSettings.Instance.ToggleQuestInfo;
+
+            if (questDetailsEnabled)
+            {
+                LogMessage($"DEBUG: Quest details are enabled.");
+                // Add quest details
+                var questManager = new QuestManager();
+                string questDetails = questManager.GetQuestDetailsForPrompt(npc);
+                if (!string.IsNullOrWhiteSpace(questDetails))
+                {
+                    prompt += $"Here are your quest details and script examples for offering it: {questDetails}\n";
+                }
+
+                // Check for quest conditions and add failure reason if applicable
+                var escortHandler = new EscortMerchantCaravanHandler();
+                var quests = questManager.GetQuestsForNPC(npc);
+            }
+
+
+
+
 
             //BROKEN CODE FIX LATER
             //        foreach (var quest in quests)
@@ -313,19 +338,37 @@ namespace ChatAi
             prompt += "\n\nRecent conversation history:\n";
             prompt += context.GetFormattedHistory();
 
+            // fetch the custom prompt from settings
+            string customPrompt = ChatAiSettings.Instance.CustomPrompt;
+            
+            if (!string.IsNullOrWhiteSpace(customPrompt))
+            {
+                LogMessage($"\n\nDEBUG: Custom prompt from settings: {customPrompt}");
+                prompt += $"\n\nExtra Instructions or Context:{customPrompt}";
+            }
+
+
+
             // Instructions for response style
             prompt += "\n\nInstructions:\n";
             prompt += "- Answer the player's latest question or comment, in character and with the correct personality.\n";
             prompt += "- Do not reference the AI, modern concepts, or anything outside this world.\n";
+            prompt += "- Use the information provided to craft a response that fits the medieval fantasy setting. \n";
+            prompt += "- Act in a way that fits your character's personality and traits.\n";
             if (longerResponses)
             {
-                prompt += "- Provide a long 2-4 paragraph, detailed and immersive response, that responds to the player.\n";
+                prompt += "- Provide a long 2-3 paragraph, detailed and immersive response, that responds to the player.\n";
             }
             else
             {
                 prompt += "- Keep responses concise and immersive. Avoid overly verbose replies unless directly asked for details.\n";
             }
-            prompt += "- If you offer any quest, try to convince the player to accept it. If you don't have a current quest don't mention anything about quests.\n";
+
+            if (questDetailsEnabled)
+            {
+                prompt += "- If you offer any quest, try to convince the player to accept it, while also making sure to respond to the latest response by the player. If you don't have a current quest don't mention anything about quests.\n";
+            }
+           
 
 
 
@@ -569,9 +612,26 @@ namespace ChatAi
             // Ensure updated relationship is used in prompt generation
             int updatedRelation = (int)Math.Round(npc.GetRelationWithPlayer());
 
-            var (action, targetSettlement, confirmationMessage) = await _actionEvaluator.EvaluateActionWithTargetAndMessage(npc, userInput);
+            // fetch if ai driven actions are enabled
+            bool aiDrivenActions = ChatAiSettings.Instance.ToggleAIActions;
 
-            LogMessage($"DEBUG: Handling action {action.ToString()} for NPC {npc.Name} with target {targetSettlement?.Name?.ToString() ?? "null"}.");
+            AIActionEvaluator.Action action = AIActionEvaluator.Action.None;
+            Settlement targetSettlement = null;
+            string confirmationMessage = null;
+
+            if (aiDrivenActions)
+            {
+                var result = await _actionEvaluator.EvaluateActionWithTargetAndMessage(npc, userInput);
+                action = result.Item1;
+                targetSettlement = result.Item2;
+                confirmationMessage = result.Item3;
+
+                LogMessage($"DEBUG: Handling action {action.ToString()} for NPC {npc.Name} with target {targetSettlement?.Name?.ToString() ?? "null"}.");
+            }
+            else
+            {
+                LogMessage("AI-driven actions are disabled in settings. Skipping action evaluation.");
+            }
 
             // Handle Action
             if (action != AIActionEvaluator.Action.None && (action != AIActionEvaluator.Action.GoToSettlement || targetSettlement != null))
@@ -604,35 +664,47 @@ namespace ChatAi
             GenerateNPCSpeech(npc, response);
             LogMessage("Azure TTS synthesis completed.");
 
-            // Analyze Quest Acceptance
-            bool isQuestAccepted = await _questManager.AnalyzeQuestAcceptance(npcLastMessage, userInput);
+            // check if quest information is toggled on
+            bool questInfoEnabled = ChatAiSettings.Instance.ToggleQuestInfo;
 
-            if (isQuestAccepted)
+            if (questInfoEnabled)
             {
-                var quests = _questManager.GetQuestsForNPC(npc);
+                LogMessage("DEBUG: Quest information is enabled. Analyzing quest acceptance...");
 
-                if (quests.Count > 0)
+            
+
+
+                // Analyze Quest Acceptance
+                bool isQuestAccepted = await _questManager.AnalyzeQuestAcceptance(npcLastMessage, userInput);
+
+                if (isQuestAccepted)
                 {
-                    foreach (var issue in quests)
+                    var quests = _questManager.GetQuestsForNPC(npc);
+
+                    if (quests.Count > 0)
                     {
-                        LogMessage($"DEBUG: Attempting to handle quest {issue.GetType().Name} for NPC {npc.Name}.");
-                        if (_questManager.HandleQuest(issue, npc))
+                        foreach (var issue in quests)
                         {
-                            LogMessage($"DEBUG: Successfully handled quest {issue.GetType().Name} for NPC {npc.Name}.");
-                        }
-                        else
-                        {
-                            LogMessage($"ERROR: Failed to handle quest {issue.GetType().Name} for NPC {npc.Name}.");
+                            LogMessage($"DEBUG: Attempting to handle quest {issue.GetType().Name} for NPC {npc.Name}.");
+                            if (_questManager.HandleQuest(issue, npc))
+                            {
+                                LogMessage($"DEBUG: Successfully handled quest {issue.GetType().Name} for NPC {npc.Name}.");
+                            }
+                            else
+                            {
+                                LogMessage($"ERROR: Failed to handle quest {issue.GetType().Name} for NPC {npc.Name}.");
+                            }
                         }
                     }
-                }
-                else
-                {
-                    LogMessage($"DEBUG: No active quests available to accept for NPC {npc.Name}.");
+                    else
+                    {
+                        LogMessage($"DEBUG: No active quests available to accept for NPC {npc.Name}.");
+                    }
                 }
             }
 
             InformationManager.DisplayMessage(new InformationMessage("I am ready to respond now!"));
+            
         }
 
 
@@ -641,6 +713,14 @@ namespace ChatAi
 
         private void HandleAction(Hero npc, AIActionEvaluator.Action action, Settlement targetSettlement = null)
         {
+            // fetch if ai driven actions are enabled
+            bool aiDrivenActions = ChatAiSettings.Instance.ToggleAIActions;
+
+            if (!aiDrivenActions)
+            {
+                LogMessage("AI-driven actions are disabled in settings. Skipping action execution.");
+                return;
+            }
 
             var behaviorLogic = new NPCBehaviorLogic();
 
@@ -758,13 +838,35 @@ namespace ChatAi
                 }
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Determine the log file path dynamically
+                string logFilePath = _logFilePath; // Default path
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                if (!Directory.Exists(logDirectory))
+                {
+                    // If the directory does not exist, fall back to the desktop
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
+
+                    if (!Directory.Exists(desktopLogDirectory))
+                    {
+                        Directory.CreateDirectory(desktopLogDirectory);
+                    }
+
+                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {
                 InformationManager.DisplayMessage(new InformationMessage($"Logging error: {ex.Message}"));
             }
         }
+
+
 
     }
 }

@@ -55,7 +55,27 @@ namespace ChatAi
                 }
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Determine the log file path dynamically
+                string logFilePath = _logFilePath; // Default path
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                if (!Directory.Exists(logDirectory))
+                {
+                    // If the directory does not exist, fall back to the desktop
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
+
+                    if (!Directory.Exists(desktopLogDirectory))
+                    {
+                        Directory.CreateDirectory(desktopLogDirectory);
+                    }
+
+                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {

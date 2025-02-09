@@ -58,6 +58,10 @@ namespace ChatAi
         // Analyze quest acceptance through AI
         public async Task<bool> AnalyzeQuestAcceptance(string npcMessage, string playerMessage)
         {
+            LogMessage("============================================================");
+            LogMessage("Quest Acceptance Analysis Starting.");
+            LogMessage("============================================================");
+
             string prompt = $"The NPC said: \"{npcMessage}\". The player responded: \"{playerMessage}\". " +
                             "Classify the player's response as one of the following categories: " +
                             "[accept_quest, other]. " +
@@ -69,6 +73,10 @@ namespace ChatAi
             string response = await AIHelper.GetResponse(prompt);
 
             LogMessage($"DEBUG: Quest acceptance analysis result: {response}");
+
+            LogMessage("============================================================");
+            LogMessage("Quest Acceptance Analysis Completed.");
+            LogMessage("============================================================");
 
             return response.Trim().Equals("accept_quest", StringComparison.OrdinalIgnoreCase);
         }
@@ -184,13 +192,34 @@ namespace ChatAi
         {
             try
             {
+                // Check if debug logging is enabled in the settings
                 if (!ChatAiSettings.Instance.EnableDebugLogging)
                 {
-                    return;
+                    return; // Skip logging if disabled
                 }
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Determine the log file path dynamically
+                string logFilePath = _logFilePath; // Default path
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                if (!Directory.Exists(logDirectory))
+                {
+                    // If the directory does not exist, fall back to the desktop
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
+
+                    if (!Directory.Exists(desktopLogDirectory))
+                    {
+                        Directory.CreateDirectory(desktopLogDirectory);
+                    }
+
+                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {

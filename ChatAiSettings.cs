@@ -26,7 +26,7 @@ namespace ChatAi
         [SettingPropertyDropdown("AI Backend", RequireRestart = false, HintText = "Select the backend to use for AI responses.")]
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public Dropdown<string> AIBackend { get; set; } = new Dropdown<string>(
-            new List<string> { "OpenAI", "KoboldCpp", "Ollama", "OpenRouter" }, 0);
+            new List<string> { "OpenAI", "KoboldCpp", "Ollama", "OpenRouter", "Deepseek" }, 0);
 
         // voice backend
         [SettingPropertyDropdown("Voice Backend", RequireRestart = false, HintText = "Select the backend to use for voice responses.")]
@@ -42,6 +42,22 @@ namespace ChatAi
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public bool LongerResponses { get; set; } = false;
 
+        // setting for adding customizable information to prompt
+        [SettingPropertyText("Custom Global Information", RequireRestart = false, HintText = "Enter any information or instructions you want to pass to all npcs. Examples: 'You are in the Game of Thrones universe.' or 'speak only in japanese'.")]
+        [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
+        public string CustomPrompt { get; set; } = "";
+
+        // setting to disable ai driven actions
+        [SettingPropertyBool("Enable AI Driven Actions", RequireRestart = false, HintText = "Toggle AI driven actions like telling npcs to go to a location, accepting quests, etc. Disabling can help save tokens and improve performance with lower quality models.")]
+        [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
+        public bool ToggleAIActions { get; set; } = true;
+
+        // setting to disable giving npcs information about quests (better to disable if using local models/free versions)
+        [SettingPropertyBool("Enable Quest Information", RequireRestart = false, HintText = "Toggle giving NPCs information about quests they offer, if they have them. Disabling can help save tokens and improve performance with lower quality models.")]
+        [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
+        public bool ToggleQuestInfo { get; set; } = true;
+
+
         // OpenAI Settings Group
         [SettingPropertyText("OpenAI API Key", RequireRestart = false, HintText = "Enter your OpenAI API key here.")]
         [SettingPropertyGroup("API Settings/OpenAI Settings", GroupOrder = 1)]
@@ -52,10 +68,15 @@ namespace ChatAi
         public Dropdown<string> OpenAIModel { get; set; } = new Dropdown<string>(
             new List<string> { "gpt-4", "gpt-3.5-turbo", "gpt-4o-mini", "gpt-4o" }, 0);
 
-        // Local Model Settings Group
+        // Kobald Settings Group
         [SettingPropertyText("KoboldCpp URL", RequireRestart = false, HintText = "Enter the URL of your KoboldCpp model server.")]
-        [SettingPropertyGroup("API Settings/Local Model Settings", GroupOrder = 2)]
+        [SettingPropertyGroup("API Settings/Kobaldccp Settings", GroupOrder = 2)]
         public string LocalModelURL { get; set; } = "http://localhost:5001/api/v1/generate";
+
+        [SettingPropertyText("KoboldCpp Model", RequireRestart = false, HintText = "Enter the name of the model you want to use with KoboldCpp.")]
+        [SettingPropertyGroup("API Settings/Kobaldccp Settings", GroupOrder = 2)]
+        public string KoboldCppModel { get; set; } = "Your-Model-Name";
+
 
         // Ollama Settings Group
         [SettingPropertyText("Ollama URL", RequireRestart = false, HintText = "Enter the URL of your Ollama model server.")]
@@ -113,6 +134,8 @@ namespace ChatAi
             }
         });
 
+
+
         // Relationship Manager Settings Group
         [SettingPropertyInteger("Base Relationship Gain", 0, 10, RequireRestart = false, HintText = "Base relationship gain for positive interactions.")]
         [SettingPropertyGroup("Relationship Manager Settings", GroupOrder = 6)]
@@ -135,10 +158,29 @@ namespace ChatAi
         [SettingPropertyGroup("Prompt Settings", GroupOrder = 7)]
         public int MaxHistoryLength { get; set; } = 5;
 
-        // Debugging Mode Group
-        [SettingPropertyBool("Enable Debug Logging", RequireRestart = false, HintText = "Enable or disable debug logging for the mod. Logs are saved to the mod_log.txt file, located in the ChatAi module folder.")]
-        [SettingPropertyGroup("Debugging", GroupOrder = 8)]
-        public bool EnableDebugLogging { get; set; } = false;
+        // Version Section, show current mod version, then if press button open nexus mod page with version 
+        [SettingPropertyButton("Current Version: 0.1.6", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
+        [SettingPropertyGroup("Version", GroupOrder = 10)]
+        public Action CheckForUpdates { get; set; } = (() =>
+        {
+            try
+            {
+                // Open the Nexus Mods page for the mod
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://www.nexusmods.com/mountandblade2bannerlord/mods/7540?tab=files&jump_to_comment=149470778",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                // Display error message
+                InformationManager.DisplayMessage(new InformationMessage($"Error checking for updates: {ex.Message}"));
+            }
+        });
+
+
+
 
         // Credits Section
         [SettingPropertyText("Credits", RequireRestart = false, HintText = "Acknowledgements and credits for the mod.")]
@@ -146,6 +188,7 @@ namespace ChatAi
 
         // Button to open credits
         [SettingPropertyButton("Created by:", Content = "DeltaBlade", RequireRestart = false, HintText = "Click to check out the developer")]
+
 
         public Action Credits { get; set; } = (() =>
         {
@@ -165,63 +208,53 @@ namespace ChatAi
             }
         });
 
-        [SettingPropertyGroup("Credits", GroupOrder = 9)]
-        [SettingPropertyButton("Some GUI work done by:", Content = "SuicideParty", RequireRestart = false, HintText = "Click to check out the developer")]
+        // Debugging Mode Group
+        [SettingPropertyBool("Enable Debug Logging", RequireRestart = false, HintText = "Enable or disable debug logging for the mod. Logs are saved to the mod_log.txt file, located in the ChatAi module folder.")]
+        [SettingPropertyGroup("Debugging", GroupOrder = 8)]
+        public bool EnableDebugLogging { get; set; } = false;
 
-        public Action Credits2 { get; set; } = (() =>
+
+        // button to open the mod folder
+        [SettingPropertyButton("Open debugging file location", Content = "Open", RequireRestart = false, HintText = "Opens the location of your mod_log file.")]
+        [SettingPropertyGroup("Debugging", GroupOrder = 8)]
+
+
+        // Modify the OpenModFolder action to use System.IO.Path explicitly
+        public Action OpenModFolder { get; set; } = (static () =>
         {
             try
             {
-                // Open the Azure TTS voices list in the default browser
-                Process.Start(new ProcessStartInfo
+                // Use BasePath.Name to construct the mod directory path
+                string modFolderPath = System.IO.Path.Combine(BasePath.Name, "Modules", "ChatAi");
+
+                if (Directory.Exists(modFolderPath))
                 {
-                    FileName = "https://www.twitch.tv/deprivate",
-                    UseShellExecute = true
-                });
+                    // Open the mod folder in the file explorer
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = modFolderPath,
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    // Log and open Desktop folder as a fallback
+                    InformationManager.DisplayMessage(new InformationMessage("ChatAi mod folder not found. Opening Desktop instead (Steam version)."));
+
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = desktopPath,
+                        UseShellExecute = true
+                    });
+                }
             }
             catch (Exception ex)
             {
-                // Display error message
-                InformationManager.DisplayMessage(new InformationMessage($"Error opening credits: {ex.Message}"));
+                // Log error message
+                InformationManager.DisplayMessage(new InformationMessage($"Error opening folder: {ex.Message}"));
             }
         });
 
-
-
-        // Button to open mod folder
-        public Action OpenModFolder { get; set; } = (static () =>
-{
-    try
-    {
-        // Use BasePath.Name to construct the mod directory path
-        string modFolderPath = System.IO.Path.Combine(BasePath.Name, "Modules", "ChatAi");
-        if (Directory.Exists(modFolderPath))
-        {
-            // Open the mod folder in the file explorer
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = modFolderPath,
-                UseShellExecute = true
-            });
-        }
-        else
-        {
-            // Display a message if the folder is not found
-            InformationManager.DisplayMessage(new InformationMessage("Mod folder not found."));
-
-            // create mod folder
-            Directory.CreateDirectory(modFolderPath);
-        }
-    }
-    catch (Exception ex)
-    {
-        // Display error message
-        InformationManager.DisplayMessage(new InformationMessage($"Error opening mod folder: {ex.Message}"));
-
-        // create mod folder
-        string modFolderPath = System.IO.Path.Combine(BasePath.Name, "Modules", "ChatAi");
-        Directory.CreateDirectory(modFolderPath);
-    }
-});
     }
 }
