@@ -65,8 +65,9 @@ namespace ChatAi
 
                 LogMessage($"Toggle Ai driven actions: {settings.ToggleAIActions}");
                 LogMessage($"Toggle Quest Information: {settings.ToggleQuestInfo}");
+                LogMessage($"Toggle World Event Tracking: {settings.ToggleWorldEvents}");
 
-                LogMessage($"OpenAI API Key: {(string.IsNullOrEmpty(settings.OpenAIAPIKey) ? "Not Set" : "Set")}");
+                    LogMessage($"OpenAI API Key: {(string.IsNullOrEmpty(settings.OpenAIAPIKey) ? "Not Set" : "Set")}");
                 LogMessage($"OpenAI Model: {settings.OpenAIModel?.SelectedValue ?? "Not Set"}");
 
                 LogMessage($"KoboldCpp URL: {settings.LocalModelURL}");

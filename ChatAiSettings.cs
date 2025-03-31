@@ -57,6 +57,10 @@ namespace ChatAi
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public bool ToggleQuestInfo { get; set; } = true;
 
+        // Setting for enabling/disabling world event tracking
+        [SettingPropertyBool("Enable World Event Tracking", RequireRestart = false, HintText = "Toggle whether world events (such as family deaths, clan leader changes, ect) are tracked and passed to related NPCs.")]
+        [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
+        public bool ToggleWorldEvents { get; set; } = true;
 
         // OpenAI Settings Group
         [SettingPropertyText("OpenAI API Key", RequireRestart = false, HintText = "Enter your OpenAI API key here.")]
@@ -137,21 +141,26 @@ namespace ChatAi
 
 
         // Relationship Manager Settings Group
-        [SettingPropertyInteger("Base Relationship Gain", 0, 10, RequireRestart = false, HintText = "Base relationship gain for positive interactions.")]
+        [SettingPropertyInteger("Base Relationship Gain", 0, 20, RequireRestart = false,
+            HintText = "Amount added to positive relationship changes. If an NPC reaction is +5, and this is set to 3, the final change will be +8.")]
         [SettingPropertyGroup("Relationship Manager Settings", GroupOrder = 6)]
-        public int BaseRelationshipGain { get; set; } = 3;
+        public int BaseRelationshipGain { get; set; } = 1;
 
-        [SettingPropertyInteger("Base Relationship Loss", -10, 0, RequireRestart = false, HintText = "Base relationship loss for negative interactions.")]
+        [SettingPropertyInteger("Base Relationship Loss", -20, 0, RequireRestart = false,
+            HintText = "Amount subtracted from negative relationship changes. If an NPC reaction is -5, and this is set to -3, the final change will be -8.")]
         [SettingPropertyGroup("Relationship Manager Settings", GroupOrder = 6)]
-        public int BaseRelationshipLoss { get; set; } = -5;
+        public int BaseRelationshipLoss { get; set; } = -1;
 
-        [SettingPropertyInteger("Max Relationship Change Per Interaction", 1, 50, RequireRestart = false, HintText = "Maximum relationship change per interaction.")]
+        [SettingPropertyInteger("Max Relationship Change Per Interaction", 1, 50, RequireRestart = false,
+            HintText = "Caps the maximum relationship change (positive or negative) per interaction. If set to 10, changes cannot exceed +10 or go below -10. If set to 0, relationship changes are disabled.")]
         [SettingPropertyGroup("Relationship Manager Settings", GroupOrder = 6)]
         public int MaxRelationshipChange { get; set; } = 10;
 
-        [SettingPropertyBool("Enable Relationship Tracking", RequireRestart = false, HintText = "Toggle whether NPC relationship changes are tracked and displayed.")]
+        [SettingPropertyBool("Enable Relationship Tracking", RequireRestart = false,
+            HintText = "Toggle whether to track and display relationship changes with NPCs. Disabling prevents relationship changes from showing on screen, but they are still applied.")]
         [SettingPropertyGroup("Relationship Manager Settings", GroupOrder = 6)]
         public bool EnableRelationshipTracking { get; set; } = true;
+
 
         // Prompt Settings Group
         [SettingPropertyInteger("Max History Length", 1, 50, RequireRestart = false, HintText = "Maximum number of conversation history entries to include in the prompt. More history will cause slower responses as well as consume more tokens but increase memory of NPCs.")]
@@ -159,7 +168,7 @@ namespace ChatAi
         public int MaxHistoryLength { get; set; } = 5;
 
         // Version Section, show current mod version, then if press button open nexus mod page with version 
-        [SettingPropertyButton("Current Version: 0.1.6", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
+        [SettingPropertyButton("Current Version: 0.1.8", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
         [SettingPropertyGroup("Version", GroupOrder = 10)]
         public Action CheckForUpdates { get; set; } = (() =>
         {
@@ -180,7 +189,31 @@ namespace ChatAi
         });
 
 
-
+        // Button to clear all NPC context and history, placed at the bottom
+        [SettingPropertyButton("Clear NPC Data", Content = "Delete ALL History", RequireRestart = false, HintText = "Click to clear all saved NPC data, including conversation history and context.")]
+        [SettingPropertyGroup("Data Management", GroupOrder = 99)]
+        public Action ClearNPCData { get; set; } = (() =>
+        {
+            try
+            {
+                InformationManager.ShowInquiry(new InquiryData(
+                    "Confirm Data Reset",
+                    "Are you sure you want to clear all NPC data? \n\n" +
+                    "This will delete all conversation history and context for all NPCs on ALL games saves. This action cannot be undone!",
+                    true, true, "Yes", "No",
+                    () =>
+                    {
+                        ChatBehavior.Instance.ClearAllNPCData();
+                        InformationManager.DisplayMessage(new InformationMessage("All NPC context and history cleared!"));
+                    },
+                    () => { }
+                ));
+            }
+            catch (Exception ex)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"Error clearing NPC data: {ex.Message}"));
+            }
+        });
 
         // Credits Section
         [SettingPropertyText("Credits", RequireRestart = false, HintText = "Acknowledgements and credits for the mod.")]

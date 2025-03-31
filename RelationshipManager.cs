@@ -17,38 +17,91 @@ namespace ChatAi
         public async Task<int> UpdateRelationshipBasedOnMessage(Hero npc, string playerInput)
         {
             LogMessage("============================================================");
-            LogMessage("Relationship Manager Starting.");
+            LogMessage($"Relationship Manager Starting for NPC: {npc.Name}");
             LogMessage("============================================================");
+
             try
             {
+                // Step 1: Get base relationship change from AI sentiment analysis
                 int relationshipChange = await AnalyzeIntent(playerInput);
-                LogMessage($"DEBUG: Relationship change for NPC {npc.Name}: {relationshipChange}");
+                LogMessage($"DEBUG: Initial AI relationship change for NPC {npc.Name}: {relationshipChange}");
 
-                relationshipChange = AdjustRelationshipChange(relationshipChange);
+                // Step 2: Modify based on BaseRelationshipGain and BaseRelationshipLoss
+                if (relationshipChange > 0)
+                {
+                    LogMessage($"DEBUG: Positive change detected. Adding BaseRelationshipGain: {ChatAiSettings.Instance.BaseRelationshipGain}");
+                    relationshipChange += ChatAiSettings.Instance.BaseRelationshipGain;
+                }
+                else if (relationshipChange < 0)
+                {
+                    LogMessage($"DEBUG: Negative change detected. Subtracting BaseRelationshipLoss: {ChatAiSettings.Instance.BaseRelationshipLoss}");
+                    relationshipChange -= ChatAiSettings.Instance.BaseRelationshipLoss;
+                }
+                LogMessage($"DEBUG: Relationship change after applying Base Gain/Loss: {relationshipChange}");
 
+                // Step 3: Check if MaxRelationshipChange is 0 (Disables changes)
+                int maxChange = ChatAiSettings.Instance.MaxRelationshipChange;
+                if (maxChange == 0)
+                {
+                    LogMessage($"DEBUG: MaxRelationshipChange is set to 0. No relationship changes will be applied.");
+                    return 0; // Exit early, preventing unnecessary calculations.
+                }
+
+                // Step 4: Cap relationship change using MaxRelationshipChange
+                if (relationshipChange > maxChange)
+                {
+                    LogMessage($"DEBUG: Relationship change {relationshipChange} exceeds max limit {maxChange}. Capping it to {maxChange}.");
+                }
+                else if (relationshipChange < -maxChange)
+                {
+                    LogMessage($"DEBUG: Relationship change {relationshipChange} is below min limit {-maxChange}. Capping it to {-maxChange}.");
+                }
+
+                relationshipChange = Math.Max(-maxChange, Math.Min(maxChange, relationshipChange));
+                LogMessage($"DEBUG: Final relationship change after capping: {relationshipChange}");
+
+                // Step 5: Apply the final relationship change
                 if (relationshipChange != 0)
                 {
                     int currentRelation = (int)Math.Round(npc.GetRelationWithPlayer());
                     int newRelation = currentRelation + relationshipChange;
+                    LogMessage($"DEBUG: Current relationship with {npc.Name}: {currentRelation}, after change: {newRelation}");
 
-                    int relationCap = ChatAiSettings.Instance.MaxRelationshipChange;
+                    // Step 6: Ensure final relationship value stays between -100 and 100
+                    int relationCap = 100; // Hard cap for relationships
                     if (newRelation > relationCap)
                     {
-                        relationshipChange = relationCap - currentRelation;
-                        newRelation = relationCap;
+                        LogMessage($"DEBUG: New relationship value {newRelation} exceeds max cap {relationCap}. Adjusting.");
+                    }
+                    else if (newRelation < -relationCap)
+                    {
+                        LogMessage($"DEBUG: New relationship value {newRelation} is below min cap {-relationCap}. Adjusting.");
                     }
 
-                    CharacterRelationManager.SetHeroRelation(Hero.MainHero, npc, newRelation);
+                    newRelation = Math.Max(-relationCap, Math.Min(relationCap, newRelation));
+                    LogMessage($"DEBUG: Final new relationship value for {npc.Name}: {newRelation}");
 
+                    // Apply relationship update
+                    CharacterRelationManager.SetHeroRelation(Hero.MainHero, npc, newRelation);
+                    LogMessage($"DEBUG: Applied relationship change for {npc.Name}. New relation: {newRelation}");
+
+                    // Update clan leader if enabled
                     if (ChatAiSettings.Instance.EnableRelationshipTracking && npc.Clan?.Leader != null && npc != npc.Clan.Leader)
                     {
+                        LogMessage($"DEBUG: Updating NPC's clan leader ({npc.Clan.Leader.Name}) relationship as well.");
                         CharacterRelationManager.SetHeroRelation(Hero.MainHero, npc.Clan.Leader, newRelation);
                     }
 
                     // Store the last relationship change globally
                     RelationshipTracker.SetRelationshipChange(npc, relationshipChange);
+                    LogMessage($"DEBUG: Stored relationship change for {npc.Name}: {relationshipChange}");
 
+                    // Display UI message
                     RelationshipOutput(relationshipChange, newRelation, npc.Name.ToString());
+
+                    LogMessage("============================================================");
+                    LogMessage($"Relationship Manager Completed for NPC: {npc.Name}");
+                    LogMessage("============================================================");
                     return relationshipChange;
                 }
 
@@ -57,7 +110,7 @@ namespace ChatAi
             }
             catch (Exception ex)
             {
-                LogMessage($"DEBUG: Relationship update failed for NPC {npc.Name}: {ex.Message}");
+                LogMessage($"ERROR: Relationship update failed for NPC {npc.Name}: {ex.Message}");
                 return 0;
             }
         }
@@ -65,19 +118,9 @@ namespace ChatAi
 
 
 
-        private int AdjustRelationshipChange(int baseChange)
-        {
-            if (baseChange > 0)
-            {
-                return Math.Min(baseChange + ChatAiSettings.Instance.BaseRelationshipGain, ChatAiSettings.Instance.MaxRelationshipChange);
-            }
-            else if (baseChange < 0)
-            {
-                return Math.Max(baseChange + ChatAiSettings.Instance.BaseRelationshipLoss, -ChatAiSettings.Instance.MaxRelationshipChange);
-            }
 
-            return baseChange;
-        }
+
+
 
         private void RelationshipOutput(int rel, int newRelation, string hero)
         {
@@ -133,9 +176,6 @@ namespace ChatAi
             string response = await AIHelper.GetResponse(prompt);
             LogMessage($"DEBUG: Intent analysis result: {response}");
 
-            LogMessage("============================================================");
-            LogMessage("Relationship Manager Completed.");
-            LogMessage("============================================================");
 
             // Ensure AI returns a valid integer, fallback to 0 if invalid
             if (int.TryParse(response.Trim(), out int result))

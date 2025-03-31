@@ -15,6 +15,8 @@ using TaleWorlds.CampaignSystem.Issues;
 using ChatAi.Quests;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.ScreenSystem;
+using TaleWorlds.SaveSystem.Load;
+
 
 
 
@@ -26,71 +28,255 @@ namespace ChatAi
 
 
 
+        private static ChatBehavior _instance;
+        public static ChatBehavior Instance => _instance ??= new ChatBehavior();
 
         private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
 
+        private readonly string _saveDataPath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "save_data");
+        private string _currentSaveFolder;
+
+
         // Dictionary to store NPC contexts
         private Dictionary<string, NPCContext> _npcContexts = new Dictionary<string, NPCContext>();
-        public override void RegisterEvents() {}
+        public override void RegisterEvents()
+        {
+            LogMessage("[DEBUG] Registering ChatBehavior...");
+
+            // Manually register WorldEventListener
+            WorldEventListener worldEventListener = new WorldEventListener();
+            worldEventListener.RegisterEvents();
+        }
+
+        public void ClearAllNPCData()
+        {
+            try
+            {
+                LogMessage("[DEBUG] Attempting to clear all NPC data...");
+
+                // Check if the main save data folder exists
+                if (!Directory.Exists(_saveDataPath))
+                {
+                    LogMessage($"[WARNING] Save data folder does not exist: {_saveDataPath}. No files to delete.");
+                    return;
+                }
+
+                // Get all game save folders inside "save_data"
+                string[] saveDirectories = Directory.GetDirectories(_saveDataPath);
+
+                if (saveDirectories.Length == 0)
+                {
+                    LogMessage("[WARNING] No game save folders found in save_data. Nothing to delete.");
+                }
+                else
+                {
+                    LogMessage($"[DEBUG] Found {saveDirectories.Length} game save folders. Deleting NPC files...");
+
+                    foreach (string saveFolder in saveDirectories)
+                    {
+                        try
+                        {
+                            string[] npcFiles = Directory.GetFiles(saveFolder, "*.json");
+
+                            if (npcFiles.Length == 0)
+                            {
+                                LogMessage($"[WARNING] No NPC save files found in {saveFolder}. Skipping...");
+                                continue;
+                            }
+
+                            LogMessage($"[DEBUG] Found {npcFiles.Length} NPC save files in {saveFolder} to delete.");
+
+                            foreach (string file in npcFiles)
+                            {
+                                try
+                                {
+                                    File.Delete(file);
+                                    LogMessage($"[DEBUG] Deleted NPC save file: {file}");
+                                }
+                                catch (Exception fileEx)
+                                {
+                                    LogMessage($"[ERROR] Failed to delete file {file}: {fileEx.Message}");
+                                }
+                            }
+                        }
+                        catch (Exception folderEx)
+                        {
+                            LogMessage($"[ERROR] Failed to process save folder {saveFolder}: {folderEx.Message}");
+                        }
+                    }
+                }
+
+                // Clear in-memory NPC data
+                _npcContexts.Clear();
+                LogMessage("[DEBUG] Cleared in-memory NPC context.");
+
+                InformationManager.DisplayMessage(new InformationMessage("All NPC context data across all saves has been cleared!"));
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"[ERROR] Failed to clear NPC data: {ex.Message}");
+                LogMessage($"[ERROR] StackTrace: {ex.StackTrace}");
+            }
+        }
+
+
         public override void SyncData(IDataStore dataStore)
         {
-            try
-            {
 
-                if (dataStore.IsSaving)
-                {
-                    // Convert _npcContexts to a serializable format (JSON string)
-                    string serializedData = SerializeNPCContexts();
-                    dataStore.SyncData("_serializedNPCContexts", ref serializedData);
-                }
-                else if (dataStore.IsLoading)
-                {
-                    // Load serialized data and deserialize it back into _npcContexts
-                    string serializedData = null;
-                    dataStore.SyncData("_serializedNPCContexts", ref serializedData);
-
-                    if (!string.IsNullOrEmpty(serializedData))
-                    {
-                        DeserializeNPCContexts(serializedData);
-                    }
-                    else
-                    {
-                        _npcContexts = new Dictionary<string, NPCContext>(); 
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"Error syncing data: {ex.Message}");
-            }
         }
-
-        private string SerializeNPCContexts()
+        private string GetActiveSaveDirectory()
         {
             try
             {
-                return JsonConvert.SerializeObject(_npcContexts, Formatting.Indented);
+                LogMessage("[DEBUG] Attempting to retrieve the active save directory...");
+
+                // Generate a unique folder name for the current game save (e.g., based on Campaign ID)
+                string saveFolderName = Campaign.Current.UniqueGameId.ToString();
+                LogMessage($"[DEBUG] Current Campaign ID: {saveFolderName}");
+
+                // Create the full path
+                string saveFolderPath = Path.Combine(_saveDataPath, saveFolderName);
+                LogMessage($"[DEBUG] Computed save folder path: {saveFolderPath}");
+
+                // Check if directory already exists
+                if (!Directory.Exists(saveFolderPath))
+                {
+                    Directory.CreateDirectory(saveFolderPath);
+                    LogMessage($"[DEBUG] Save directory did not exist. Created new directory: {saveFolderPath}");
+                }
+                else
+                {
+                    LogMessage($"[DEBUG] Save directory already exists: {saveFolderPath}");
+                }
+
+                return saveFolderPath;
             }
             catch (Exception ex)
             {
-                LogMessage($"Error serializing NPC contexts: {ex.Message}");
-                return string.Empty;
+                LogMessage($"[ERROR] Failed to get active save directory: {ex.Message}");
+                LogMessage($"[ERROR] StackTrace: {ex.StackTrace}");
+
+                return _saveDataPath; // Default to the main save_data folder if error occurs
             }
         }
 
-        private void DeserializeNPCContexts(string serializedData)
+
+        private void SaveNPCContext(string npcId, Hero npc, NPCContext context)
         {
             try
             {
-                _npcContexts = JsonConvert.DeserializeObject<Dictionary<string, NPCContext>>(serializedData)
-                               ?? new Dictionary<string, NPCContext>();
+                LogMessage($"[DEBUG] Attempting to save NPC context for {npcId}...");
+
+                if (string.IsNullOrEmpty(_currentSaveFolder))
+                {
+                    _currentSaveFolder = GetActiveSaveDirectory();
+                    LogMessage($"[DEBUG] Retrieved active save directory: {_currentSaveFolder}");
+                }
+
+                // Convert NPC name to a safe filename format
+                string safeNpcName = context.Name.Replace(" ", "_").Replace("/", "").Replace("\\", "").Replace("?", "");
+                string npcFilePath = Path.Combine(_currentSaveFolder, $"{safeNpcName}.json");
+
+                LogMessage($"[DEBUG] Computed save file path: {npcFilePath}");
+
+                // Ensure Name is not null or "Unknown NPC"
+                if (string.IsNullOrEmpty(context.Name) || context.Name == "Unknown NPC")
+                {
+                    string npcName = npc?.Name?.ToString() ?? "Unknown_NPC";
+                    LogMessage($"[WARNING] NPC {npcId} had an invalid or missing name. Assigning: {npcName}.");
+                    context.Name = npcName;
+                }
+
+                LogMessage($"[DEBUG] NPC {npcId} is being saved with name: {context.Name}");
+
+                // Log the number of messages being saved
+                LogMessage($"[DEBUG] NPC {npcId} message history count: {context.MessageHistory.Count}");
+
+                // Create a fully populated context object for saving
+                NPCContext fullContext = new NPCContext
+                {
+                    Name = context.Name,
+                    MessageHistory = new List<string>(context.MessageHistory) // ✅ No StaticStats!
+                };
+
+                // Convert to JSON and save
+                string json = JsonConvert.SerializeObject(fullContext, Formatting.Indented);
+                LogMessage($"[DEBUG] JSON Serialization successful. Writing to file...");
+
+                File.WriteAllText(npcFilePath, json);
+                LogMessage($"[DEBUG] Successfully saved NPC context to: {npcFilePath}");
             }
             catch (Exception ex)
             {
-                LogMessage($"Error deserializing NPC contexts: {ex.Message}");
-                _npcContexts = new Dictionary<string, NPCContext>();
+                LogMessage($"[ERROR] Failed to save NPC data for {npcId}: {ex.Message}");
+                LogMessage($"[ERROR] StackTrace: {ex.StackTrace}");
             }
         }
+
+
+
+
+
+
+        private NPCContext LoadNPCContext(string npcId)
+        {
+            try
+            {
+                LogMessage($"[DEBUG] Attempting to load NPC context for ID: {npcId}");
+
+                if (string.IsNullOrEmpty(_currentSaveFolder))
+                {
+                    _currentSaveFolder = GetActiveSaveDirectory();
+                    LogMessage($"[DEBUG] Retrieved active save directory: {_currentSaveFolder}");
+                }
+
+                // Convert NPC name to a safe filename format
+                string safeNpcName = Hero.AllAliveHeroes
+                    .FirstOrDefault(h => h.StringId == npcId)?
+                    .Name?.ToString()
+                    .Replace(" ", "_").Replace("/", "").Replace("\\", "").Replace("?", "") ?? npcId;
+
+                string npcFilePath = Path.Combine(_currentSaveFolder, $"{safeNpcName}.json");
+
+                LogMessage($"[DEBUG] Checking if save file exists for {npcId} (Expected path: {npcFilePath})");
+
+                if (!File.Exists(npcFilePath))
+                {
+                    LogMessage($"[WARNING] No save file found for NPC {npcId}. A new NPC context will be created.");
+                    return new NPCContext { Name = "Unknown_NPC" };
+                }
+
+                LogMessage($"[DEBUG] Save file found for {npcId}. Attempting to read and deserialize...");
+
+                string json = File.ReadAllText(npcFilePath);
+                NPCContext loadedContext = JsonConvert.DeserializeObject<NPCContext>(json) ?? new NPCContext { Name = "Unknown_NPC" };
+
+                LogMessage($"[DEBUG] Successfully deserialized NPC context for {npcId}.");
+
+                // Check if the loaded context has a valid name
+                if (string.IsNullOrEmpty(loadedContext.Name) || loadedContext.Name == "Unknown_NPC")
+                {
+                    string npcName = Hero.AllAliveHeroes.FirstOrDefault(h => h.StringId == npcId)?.Name?.ToString() ?? "Unknown_NPC";
+                    LogMessage($"[WARNING] NPC {npcId} had no name in save. Assigning real name: {npcName}.");
+                    loadedContext.Name = npcName;
+                }
+                else
+                {
+                    LogMessage($"[DEBUG] Loaded NPC {npcId} has a valid name: {loadedContext.Name}");
+                }
+
+                return loadedContext;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"[ERROR] Failed to load NPC data for {npcId}: {ex.Message}");
+                LogMessage($"[ERROR] StackTrace: {ex.StackTrace}");
+            }
+
+            // If no file was found or deserialization failed, return a new context
+            return new NPCContext { Name = "Unknown_NPC" };
+        }
+
 
 
         private string GetCurrentDate()
@@ -115,56 +301,102 @@ namespace ChatAi
         private NPCContext GetOrCreateNPCContext(Hero npc)
         {
             string npcId = npc.StringId;
+            LogMessage($"[DEBUG] Attempting to retrieve NPC context for {npc.Name} (ID: {npcId})");
 
-            if (!_npcContexts.ContainsKey(npcId))
+            // If NPC context already exists in memory, return it
+            if (_npcContexts.ContainsKey(npcId))
             {
-                var context = new NPCContext
-                {
-                    Name = npc.Name.ToString()
-                };
-
-                // Add dynamic stats
-                context.AddDynamicStat("Title/Occupation", () => npc.Occupation.ToString());
-                context.AddDynamicStat("Fief", () => npc.CurrentSettlement?.Name?.ToString() ?? "No fief");
-                context.AddDynamicStat("Relationship with player(-100 being hated/enemies, 0 being neutral, 100 being very liked/best friends)",
-                    () => npc.GetRelationWithPlayer().ToString());
-                context.AddDynamicStat("Renown", () => npc.Clan?.Renown.ToString() ?? "Unknown");
-                context.AddDynamicStat("Personality", () => GetPersonalityDescription(npc));
-                context.AddDynamicStat("Age", () => npc.Age.ToString("0")); // Format age to avoid decimals
-                context.AddDynamicStat("Gender", () => npc.IsFemale ? "Female" : "Male");
-                context.AddDynamicStat("Culture", () => npc.Culture?.Name?.ToString() ?? "Unknown");
-
-                // Add kingdom affiliation dynamically
-                context.AddDynamicStat("Kingdom",
-                    () => npc.Clan?.Kingdom?.Name?.ToString() ?? "No kingdom");
-
-                // Add clan information dynamically
-                context.AddDynamicStat("Clan",
-                    () => npc.Clan?.Name?.ToString() ?? "No clan");
-                context.AddDynamicStat("Clan Leader",
-                    () => npc.Clan?.Leader?.Name?.ToString() ?? "No leader");
-
-                // npc mother and father
-                context.AddDynamicStat("Mother",
-                    () => npc.Mother?.Name?.ToString() ?? "Unknown");
-                context.AddDynamicStat("Father",
-                    () => npc.Father?.Name?.ToString() ?? "Unknown");
-
-                // children if any
-                context.AddDynamicStat("Children",
-                    () => npc.Children.Any() ? string.Join(", ", npc.Children.Select(c => c.Name.ToString())) : "None");
-
-                // spouse if any
-                context.AddDynamicStat("Spouse",
-                    () => npc.Spouse?.Name?.ToString() ?? "None");
-
-
-
-                _npcContexts[npcId] = context;
+                LogMessage($"[DEBUG] NPC {npc.Name} (ID: {npcId}) found in memory. Returning existing context.");
+                return _npcContexts[npcId];
             }
+
+            // Attempt to load existing save file
+            LogMessage($"[DEBUG] No in-memory context found for {npc.Name} (ID: {npcId}). Checking save files...");
+            NPCContext loadedContext = LoadNPCContext(npcId);
+
+            // Check if a save file was loaded
+            if (loadedContext != null)
+            {
+                LogMessage($"[DEBUG] Successfully loaded NPC context for {npc.Name} (ID: {npcId}) from save.");
+            }
+            else
+            {
+                LogMessage($"[WARNING] No save file found for {npc.Name} (ID: {npcId}). Creating a new NPC context.");
+                loadedContext = new NPCContext();
+            }
+
+            // If the loaded context has no name, assign the NPC's real name
+            if (string.IsNullOrEmpty(loadedContext.Name) || loadedContext.Name == "Unknown_NPC")
+            {
+                LogMessage($"[WARNING] NPC {npcId} had an invalid or missing name in save. Assigning real name: {npc.Name}.");
+                loadedContext.Name = npc.Name.ToString();
+            }
+            else
+            {
+                LogMessage($"[DEBUG] Loaded NPC {npc.Name} (ID: {npcId}) has a valid name: {loadedContext.Name}.");
+            }
+
+            // Store in memory
+            _npcContexts[npcId] = loadedContext;
+
+            // Always refresh NPC stats dynamically
+            LogMessage($"[DEBUG] Updating dynamic stats for NPC {npc.Name} (ID: {npcId}).");
+            UpdateNPCStats(_npcContexts[npcId], npc);
 
             return _npcContexts[npcId];
         }
+
+
+        private void UpdateNPCStats(NPCContext context, Hero npc)
+        {
+            // Store in both Dynamic and Static Stats
+            context.AddDynamicStat("Title/Occupation", () => npc.Occupation.ToString());
+            context.AddStaticStat("Title/Occupation", npc.Occupation.ToString());
+
+            context.AddDynamicStat("Fief", () => npc.CurrentSettlement?.Name?.ToString() ?? "No fief");
+            context.AddStaticStat("Fief", npc.CurrentSettlement?.Name?.ToString() ?? "No fief");
+
+            context.AddDynamicStat("Relationship with player", () => npc.GetRelationWithPlayer().ToString());
+            context.AddStaticStat("Relationship with player", npc.GetRelationWithPlayer().ToString());
+
+            context.AddDynamicStat("Renown", () => npc.Clan?.Renown.ToString() ?? "Unknown");
+            context.AddStaticStat("Renown", npc.Clan?.Renown.ToString() ?? "Unknown");
+
+            context.AddDynamicStat("Personality", () => GetPersonalityDescription(npc));
+            context.AddStaticStat("Personality", GetPersonalityDescription(npc));
+
+            context.AddDynamicStat("Age", () => npc.Age.ToString("0"));
+            context.AddStaticStat("Age", npc.Age.ToString("0"));
+
+            context.AddDynamicStat("Gender", () => npc.IsFemale ? "Female" : "Male");
+            context.AddStaticStat("Gender", npc.IsFemale ? "Female" : "Male");
+
+            context.AddDynamicStat("Culture", () => npc.Culture?.Name?.ToString() ?? "Unknown");
+            context.AddStaticStat("Culture", npc.Culture?.Name?.ToString() ?? "Unknown");
+
+            context.AddDynamicStat("Kingdom", () => npc.Clan?.Kingdom?.Name?.ToString() ?? "No kingdom");
+            context.AddStaticStat("Kingdom", npc.Clan?.Kingdom?.Name?.ToString() ?? "No kingdom");
+
+            context.AddDynamicStat("Clan", () => npc.Clan?.Name?.ToString() ?? "No clan");
+            context.AddStaticStat("Clan", npc.Clan?.Name?.ToString() ?? "No clan");
+
+            context.AddDynamicStat("Clan Leader", () => npc.Clan?.Leader?.Name?.ToString() ?? "No leader");
+            context.AddStaticStat("Clan Leader", npc.Clan?.Leader?.Name?.ToString() ?? "No leader");
+
+            context.AddDynamicStat("Mother", () => npc.Mother?.Name?.ToString() ?? "Unknown");
+            context.AddStaticStat("Mother", npc.Mother?.Name?.ToString() ?? "Unknown");
+
+            context.AddDynamicStat("Father", () => npc.Father?.Name?.ToString() ?? "Unknown");
+            context.AddStaticStat("Father", npc.Father?.Name?.ToString() ?? "Unknown");
+
+            context.AddDynamicStat("Children", () => npc.Children.Any() ? string.Join(", ", npc.Children.Select(c => c.Name.ToString())) : "None");
+            context.AddStaticStat("Children", npc.Children.Any() ? string.Join(", ", npc.Children.Select(c => c.Name.ToString())) : "None");
+
+            context.AddDynamicStat("Spouse", () => npc.Spouse?.Name?.ToString() ?? "None");
+            context.AddStaticStat("Spouse", npc.Spouse?.Name?.ToString() ?? "None");
+        }
+
+
 
 
 
@@ -259,6 +491,8 @@ namespace ChatAi
         {
             NPCContext context = GetOrCreateNPCContext(npc);
 
+
+
             string playerName = Hero.MainHero?.Name?.ToString() ?? "Stranger";
             string playerLocation = GetPlayerLocation();
             string currentDate = GetCurrentDate();
@@ -272,7 +506,7 @@ namespace ChatAi
             // Fetch all dynamic stats
             foreach (var stat in context.GetAllStats())
             {
-                prompt += $"\n{stat.Key}: {stat.Value}\n";
+                prompt += $"\n{stat.Key}: {stat.Value}\n\n";
 
             }
 
@@ -298,7 +532,7 @@ namespace ChatAi
                 string questDetails = questManager.GetQuestDetailsForPrompt(npc);
                 if (!string.IsNullOrWhiteSpace(questDetails))
                 {
-                    prompt += $"Here are your quest details and script examples for offering it: {questDetails}\n";
+                    prompt += $"\nHere are your quest details and script examples for offering it: {questDetails}\n";
                 }
 
                 // Check for quest conditions and add failure reason if applicable
@@ -335,6 +569,24 @@ namespace ChatAi
             //  }
 
 
+            if (ChatAiSettings.Instance.ToggleWorldEvents)
+                LogMessage($"DEBUG: World events are enabled.");
+            {
+                List<string> recentEvents = WorldEventListener.GetEventsForNPC(npc);
+                WorldEventTracker.LogMessage($"[DEBUG] Events for {npc.Name}: {string.Join(", ", recentEvents)}");
+
+                if (recentEvents.Any())
+                {
+                    prompt += "\n\nRecent world events affecting you:\n";
+                    foreach (string eventDescription in recentEvents)
+                    {
+                        WorldEventTracker.LogMessage($"[DEBUG] Adding event to {npc.Name}'s prompt: {eventDescription}");
+                        prompt += $"- {eventDescription}\n";
+                    }
+                }
+            }
+
+
             prompt += "\n\nRecent conversation history:\n";
             prompt += context.GetFormattedHistory();
 
@@ -368,7 +620,7 @@ namespace ChatAi
             {
                 prompt += "- If you offer any quest, try to convince the player to accept it, while also making sure to respond to the latest response by the player. If you don't have a current quest don't mention anything about quests.\n";
             }
-           
+
 
 
 
@@ -597,6 +849,11 @@ namespace ChatAi
             string npcLastMessage = context.GetLatestNPCMessage(); // Fetch NPC's last message before user input
 
             context.AddMessage($"User: {userInput}");
+            UpdateNPCStats(context, npc);
+            SaveNPCContext(npc.StringId, npc, context); 
+
+
+
 
             InformationManager.DisplayMessage(new InformationMessage("Please wait, I am thinking!"));
 
@@ -657,6 +914,8 @@ namespace ChatAi
             // Add the AI's response to the conversation history
             context.AddMessage($"NPC: {response}");
 
+            SaveNPCContext(npc.StringId, npc, context);
+
             MBTextManager.SetTextVariable("DYNAMIC_NPC_RESPONSE", response);
 
             // Call Azure TTS to synthesize the response
@@ -702,6 +961,10 @@ namespace ChatAi
                     }
                 }
             }
+
+            // wait 1 second before displaying the I am ready to respond now message to make sure azure tts has finished
+            await Task.Delay(1000);
+
 
             InformationManager.DisplayMessage(new InformationMessage("I am ready to respond now!"));
             

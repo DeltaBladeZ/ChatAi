@@ -226,20 +226,20 @@ namespace ChatAi
         {
             var settings = ChatAiSettings.Instance;
             string localModelUrl = settings.LocalModelURL;
-            string model = settings.KoboldCppModel;  // Get the specified model name
+            string model = settings.KoboldCppModel;
             int maxTokens = settings.MaxTokens;
 
             LogMessage($"DEBUG: KoboldCpp URL: {localModelUrl}");
             LogMessage($"DEBUG: KoboldCpp Model: {model}");
+            LogMessage($"DEBUG: KoboldCpp Max Tokens (From Settings): {maxTokens}");
 
             var payload = new
             {
                 prompt = prompt,
                 temperature = 0.7,
-                max_new_tokens = maxTokens,
-                top_p = 0.9, // Nucleus sampling
-                stop_sequence = new[] { "" } // Removes stop sequence
-
+                max_length = maxTokens, // Ensure this uses the latest value
+                top_p = 0.9,
+                stop_sequence = new[] { "" }
             };
 
             var jsonPayload = JsonConvert.SerializeObject(payload);
@@ -261,12 +261,6 @@ namespace ChatAi
 
             var responseBody = await response.Content.ReadAsStringAsync();
             LogMessage($"DEBUG: KoboldCpp Raw Response: {responseBody}");
-
-            // If DeepSeek is being used, clean the response
-            if (model.IndexOf("deepseek", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                responseBody = CleanDeepSeekResponse(responseBody);
-            }
 
             var jsonResponse = JsonConvert.DeserializeObject<KoboldCppResponse>(responseBody);
 
