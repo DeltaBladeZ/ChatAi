@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Version>0.1.8</Version>
+    <Version>0.2.0</Version>
     <TargetFrameworks>net472;net6</TargetFrameworks>
     <Platforms>x64</Platforms>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
@@ -28,6 +28,7 @@
   <ItemGroup>
     <!-- Package References -->
     <PackageReference Include="Bannerlord.MCM" Version="5.10.2" />
+    <PackageReference Include="Bannerlord.UIExtenderEx" Version="2.12.0" />
     <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.42.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

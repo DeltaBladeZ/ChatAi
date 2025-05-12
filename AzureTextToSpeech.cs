@@ -27,6 +27,13 @@ namespace ChatAi
 
         public async Task GenerateSpeech(string text, bool isFemale)
         {
+            // Check if Azure is selected as the voice backend
+            if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue != "Azure")
+            {
+                LogDebug("Azure TTS skipped - Azure is not selected as the voice backend.");
+                return;
+            }
+
             string subscriptionKey = ChatAiSettings.Instance.AzureTTSKey;
             string region = ChatAiSettings.Instance.AzureTTSRegion;
 

@@ -26,13 +26,13 @@ namespace ChatAi
         [SettingPropertyDropdown("AI Backend", RequireRestart = false, HintText = "Select the backend to use for AI responses.")]
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public Dropdown<string> AIBackend { get; set; } = new Dropdown<string>(
-            new List<string> { "OpenAI", "KoboldCpp", "Ollama", "OpenRouter", "Deepseek" }, 0);
+            new List<string> { "OpenAI", "KoboldCpp", "Ollama", "OpenRouter", "Player2" }, 0);
 
         // voice backend
         [SettingPropertyDropdown("Voice Backend", RequireRestart = false, HintText = "Select the backend to use for voice responses.")]
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public Dropdown<string> VoiceBackend { get; set; } = new Dropdown<string>(
-            new List<string> { "Azure", "PLACEHOLDER" }, 0);
+            new List<string> { "Azure", "Player2", "[None]" }, 0);
 
         [SettingPropertyInteger("Max Tokens", 100, 4000, RequireRestart = false, HintText = "Set the maximum number of tokens for AI responses.")]
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
@@ -168,7 +168,7 @@ namespace ChatAi
         public int MaxHistoryLength { get; set; } = 5;
 
         // Version Section, show current mod version, then if press button open nexus mod page with version 
-        [SettingPropertyButton("Current Version: 0.1.8", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
+        [SettingPropertyButton("Current Version: 0.2.0", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
         [SettingPropertyGroup("Version", GroupOrder = 10)]
         public Action CheckForUpdates { get; set; } = (() =>
         {
@@ -241,6 +241,28 @@ namespace ChatAi
             }
         });
 
+
+
+
+        // Button to visit Patreon page
+        [SettingPropertyButton("Thanks to our Patreon Supporters: Jeonsa", Content = "Become a Supporter on Patreon to support the mod!", RequireRestart = false, HintText = "Click to visit our Patreon page and support the development of this mod.")]
+        [SettingPropertyGroup("Credits", GroupOrder = 9)]
+        public Action VisitPatreon { get; set; } = (() =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://www.patreon.com/c/DeltaBlade",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"Error opening Patreon page: {ex.Message}"));
+            }
+        });
+
         // Debugging Mode Group
         [SettingPropertyBool("Enable Debug Logging", RequireRestart = false, HintText = "Enable or disable debug logging for the mod. Logs are saved to the mod_log.txt file, located in the ChatAi module folder.")]
         [SettingPropertyGroup("Debugging", GroupOrder = 8)]
@@ -289,5 +311,45 @@ namespace ChatAi
             }
         });
 
+        // Player2 Settings Group
+        [SettingPropertyText("Player2 API URL", RequireRestart = false, HintText = "The URL for the Player2 API. Default is http://localhost:4315")]
+        [SettingPropertyGroup("API Settings/Player2 Settings", GroupOrder = 6)]
+        public string Player2ApiUrl { get; set; } = "http://localhost:4315";
+
+        // Player2 TTS Settings Group
+        [SettingPropertyText("Player2 Voice ID", RequireRestart = false, HintText = "The ID of the voice to use for TTS. Leave empty to use default voice.")]
+        [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 7)]
+        public string Player2VoiceId { get; set; } = "";
+
+        [SettingPropertyDropdown("Player2 Voice Gender", RequireRestart = false, HintText = "The gender of the voice to use for TTS.")]
+        [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 7)]
+        public Dropdown<string> Player2VoiceGender { get; set; } = new Dropdown<string>(
+            new List<string> { "male", "female" }, 1);
+
+        [SettingPropertyText("Player2 Voice Language", RequireRestart = false, HintText = "The language code for the voice (e.g., en_US).")]
+        [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 7)]
+        public string Player2VoiceLanguage { get; set; } = "en_US";
+
+        [SettingPropertyInteger("Player2 TTS Speed", 50, 200, RequireRestart = false, HintText = "The speed of the TTS voice (50 to 200, where 100 is normal speed).")]
+        [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 7)]
+        public int Player2TTSSpeed { get; set; } = 100;
+
+        [SettingPropertyInteger("Player2 TTS Volume", 0, 100, RequireRestart = false, HintText = "The volume of the TTS voice (0 to 100).")]
+        [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 7)]
+        public int Player2TTSVolume { get; set; } = 70;
+
+        [SettingPropertyButton("Refresh Player2 Voices", Content = "Refresh", RequireRestart = false, HintText = "Click to refresh the list of available Player2 voices.")]
+        [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 7)]
+        public Action RefreshPlayer2Voices { get; set; } = (() =>
+        {
+            try
+            {
+                Player2TextToSpeech.RefreshAvailableVoices();
+            }
+            catch (Exception ex)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"Error refreshing Player2 voices: {ex.Message}"));
+            }
+        });
     }
 }

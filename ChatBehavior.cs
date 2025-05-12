@@ -37,11 +37,19 @@ namespace ChatAi
         private string _currentSaveFolder;
 
 
-        // Dictionary to store NPC contexts
-        private Dictionary<string, NPCContext> _npcContexts = new Dictionary<string, NPCContext>();
+        // Dictionary to store NPC contexts with timestamp of when they were loaded
+        private Dictionary<string, (NPCContext context, DateTime loadTime)> _npcContexts = new Dictionary<string, (NPCContext, DateTime)>();
         public override void RegisterEvents()
         {
             LogMessage("[DEBUG] Registering ChatBehavior...");
+
+            // Initialize Player2 health check if Player2 is selected as either voice or AI backend
+            if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Player2" || 
+                ChatAiSettings.Instance.AIBackend?.SelectedValue == "Player2")
+            {
+                Player2TextToSpeech.InitializeHealthCheck();
+                LogMessage("[DEBUG] Initialized Player2 health check.");
+            }
 
             // Manually register WorldEventListener
             WorldEventListener worldEventListener = new WorldEventListener();
@@ -196,7 +204,7 @@ namespace ChatAi
                 NPCContext fullContext = new NPCContext
                 {
                     Name = context.Name,
-                    MessageHistory = new List<string>(context.MessageHistory) // ✅ No StaticStats!
+                    MessageHistory = new List<string>(context.MessageHistory) 
                 };
 
                 // Convert to JSON and save
@@ -205,6 +213,13 @@ namespace ChatAi
 
                 File.WriteAllText(npcFilePath, json);
                 LogMessage($"[DEBUG] Successfully saved NPC context to: {npcFilePath}");
+                
+                // Update the in-memory cache with the current timestamp
+                if (_npcContexts.ContainsKey(npcId))
+                {
+                    _npcContexts[npcId] = (context, DateTime.Now);
+                    LogMessage($"[DEBUG] Updated in-memory cache timestamp for {npcId}");
+                }
             }
             catch (Exception ex)
             {
@@ -303,21 +318,50 @@ namespace ChatAi
             string npcId = npc.StringId;
             LogMessage($"[DEBUG] Attempting to retrieve NPC context for {npc.Name} (ID: {npcId})");
 
-            // If NPC context already exists in memory, return it
-            if (_npcContexts.ContainsKey(npcId))
+            if (string.IsNullOrEmpty(_currentSaveFolder))
             {
-                LogMessage($"[DEBUG] NPC {npc.Name} (ID: {npcId}) found in memory. Returning existing context.");
-                return _npcContexts[npcId];
+                _currentSaveFolder = GetActiveSaveDirectory();
             }
 
-            // Attempt to load existing save file
-            LogMessage($"[DEBUG] No in-memory context found for {npc.Name} (ID: {npcId}). Checking save files...");
-            NPCContext loadedContext = LoadNPCContext(npcId);
+            // Generate file path for this NPC
+            string safeNpcName = npc.Name.ToString().Replace(" ", "_").Replace("/", "").Replace("\\", "").Replace("?", "");
+            string npcFilePath = Path.Combine(_currentSaveFolder, $"{safeNpcName}.json");
 
-            // Check if a save file was loaded
-            if (loadedContext != null)
+            // Check if file exists and when it was last modified (to detect if it's been deleted since we cached it)
+            bool fileExists = File.Exists(npcFilePath);
+            DateTime fileModTime = fileExists ? File.GetLastWriteTime(npcFilePath) : DateTime.MinValue;
+
+            // If NPC context already exists in memory, check if it's still valid
+            if (_npcContexts.ContainsKey(npcId))
             {
-                LogMessage($"[DEBUG] Successfully loaded NPC context for {npc.Name} (ID: {npcId}) from save.");
+                var (cachedContext, cacheTime) = _npcContexts[npcId];
+                
+                // If file no longer exists or has been modified since we cached it
+                if (!fileExists || (fileExists && fileModTime > cacheTime))
+                {
+                    LogMessage($"[DEBUG] NPC {npc.Name} (ID: {npcId}) context is stale or file was deleted. Reloading from disk.");
+                    // Don't return cached context - fall through to reload or create new
+                }
+                else
+                {
+                    LogMessage($"[DEBUG] NPC {npc.Name} (ID: {npcId}) found in memory and up to date. Returning existing context.");
+                    return cachedContext;
+                }
+            }
+
+            // Load or create context
+            NPCContext loadedContext;
+            if (fileExists)
+            {
+                LogMessage($"[DEBUG] Loading NPC context for {npc.Name} (ID: {npcId}) from file.");
+                loadedContext = LoadNPCContext(npcId);
+                
+                // Check if deserialization failed (rare but possible)
+                if (loadedContext == null)
+                {
+                    LogMessage($"[WARNING] Failed to deserialize context for {npc.Name}. Creating a new one.");
+                    loadedContext = new NPCContext();
+                }
             }
             else
             {
@@ -325,25 +369,21 @@ namespace ChatAi
                 loadedContext = new NPCContext();
             }
 
-            // If the loaded context has no name, assign the NPC's real name
+            // Ensure the name is set correctly
             if (string.IsNullOrEmpty(loadedContext.Name) || loadedContext.Name == "Unknown_NPC")
             {
-                LogMessage($"[WARNING] NPC {npcId} had an invalid or missing name in save. Assigning real name: {npc.Name}.");
+                LogMessage($"[WARNING] NPC {npcId} had an invalid or missing name. Assigning real name: {npc.Name}.");
                 loadedContext.Name = npc.Name.ToString();
             }
-            else
-            {
-                LogMessage($"[DEBUG] Loaded NPC {npc.Name} (ID: {npcId}) has a valid name: {loadedContext.Name}.");
-            }
 
-            // Store in memory
-            _npcContexts[npcId] = loadedContext;
+            // Store in memory with current timestamp
+            _npcContexts[npcId] = (loadedContext, DateTime.Now);
 
-            // Always refresh NPC stats dynamically
+            // Always refresh NPC stats
             LogMessage($"[DEBUG] Updating dynamic stats for NPC {npc.Name} (ID: {npcId}).");
-            UpdateNPCStats(_npcContexts[npcId], npc);
+            UpdateNPCStats(loadedContext, npc);
 
-            return _npcContexts[npcId];
+            return loadedContext;
         }
 
 
@@ -720,13 +760,16 @@ namespace ChatAi
                         LogMessage("Player clicked to continue the conversation and hear the NPC's response.");
                         //check if azure is the backend selected in chatAi settings
                         if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Azure")
-                        LogMessage("Azure TTS selected. Playing deferred audio.");
                         {
+                            LogMessage("Azure TTS selected. Playing deferred audio.");
                             AzureTextToSpeech.PlayDeferredAudio(); // Use static method
                         }
-
+                        else if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Player2")
+                        {
+                            LogMessage("Player2 TTS selected. Playing stored text.");
+                            OnContinueClicked();
+                        }
                     }
-
                 );
 
                 // Goodbye Option
@@ -809,11 +852,28 @@ namespace ChatAi
         {
             LogMessage($"Generating speech for NPC: {npc.Name}. Gender: {(npc.IsFemale ? "Female" : "Male")}");
 
-            var tts = new AzureTextToSpeech();
-            await tts.GenerateSpeech(text, npc.IsFemale); // Pass gender to TTS
+            var settings = ChatAiSettings.Instance;
+            if (settings.VoiceBackend?.SelectedValue == "Player2")
+            {
+                // Store the text for later playback
+                Player2TextToSpeech.StoreTextForPlayback(text, npc.IsFemale);
+            }
+            else if (settings.VoiceBackend?.SelectedValue == "Azure")
+            {
+                var tts = new AzureTextToSpeech();
+                await tts.GenerateSpeech(text, npc.IsFemale);
+            }
         }
 
-
+        // Add this method to handle the continue click
+        public static void OnContinueClicked()
+        {
+            var settings = ChatAiSettings.Instance;
+            if (settings.VoiceBackend?.SelectedValue == "Player2")
+            {
+                Player2TextToSpeech.PlayStoredText();
+            }
+        }
 
         private async Task HandlePlayerInput()
         {
@@ -875,15 +935,17 @@ namespace ChatAi
             AIActionEvaluator.Action action = AIActionEvaluator.Action.None;
             Settlement targetSettlement = null;
             string confirmationMessage = null;
+            int hiringCost = 0;
 
             if (aiDrivenActions)
             {
-                var result = await _actionEvaluator.EvaluateActionWithTargetAndMessage(npc, userInput);
+                var result = await _actionEvaluator.EvaluateActionWithTargetAndMessageAndCost(npc, userInput);
                 action = result.Item1;
                 targetSettlement = result.Item2;
                 confirmationMessage = result.Item3;
+                hiringCost = result.Item4;
 
-                LogMessage($"DEBUG: Handling action {action.ToString()} for NPC {npc.Name} with target {targetSettlement?.Name?.ToString() ?? "null"}.");
+                LogMessage($"DEBUG: Handling action {action.ToString()} for NPC {npc.Name} with target {targetSettlement?.Name?.ToString() ?? "null"} and cost {hiringCost}.");
             }
             else
             {
@@ -891,18 +953,31 @@ namespace ChatAi
             }
 
             // Handle Action
-            if (action != AIActionEvaluator.Action.None && (action != AIActionEvaluator.Action.GoToSettlement || targetSettlement != null))
+            if (action != AIActionEvaluator.Action.None && 
+                action != AIActionEvaluator.Action.OfferToJoinParty && 
+                (action != AIActionEvaluator.Action.GoToSettlement || targetSettlement != null))
             {
-                HandleAction(npc, action, targetSettlement);
+                HandleAction(npc, action, targetSettlement, hiringCost);
             }
             else if (confirmationMessage != null)
             {
                 LogMessage($"DEBUG: Confirmation message: {confirmationMessage}");
             }
 
+            // Special handling for OfferToJoinParty - we want this to flow through to the AI response
+            string extraPromptInfo = "";
+            if (action == AIActionEvaluator.Action.OfferToJoinParty)
+            {
+                // Store the hire cost in the NPC context for later retrieval
+                context.AddStaticStat("HireCost", hiringCost.ToString());
+                SaveNPCContext(npc.StringId, npc, context);
+                
+                extraPromptInfo = $"Offer to join the player's party for {hiringCost} denars. Make sure to mention this specific amount.";
+                LogMessage($"DEBUG: Added hire cost of {hiringCost} to {npc.Name}'s context and prompt.");
+            }
+
             // Prompt Generation
-            string prompt = GeneratePrompt(npc, confirmationMessage);
-            //LogMessage($"DEBUG: Calling AIHelper.GetResponse for chatbot with prompt: {prompt}");
+            string prompt = GeneratePrompt(npc, extraPromptInfo.Length > 0 ? extraPromptInfo : confirmationMessage);
             string response = await AIHelper.GetResponse(prompt);
 
             if (string.IsNullOrWhiteSpace(response))
@@ -919,9 +994,7 @@ namespace ChatAi
             MBTextManager.SetTextVariable("DYNAMIC_NPC_RESPONSE", response);
 
             // Call Azure TTS to synthesize the response
-            LogMessage("Initiating Azure TTS...");
             GenerateNPCSpeech(npc, response);
-            LogMessage("Azure TTS synthesis completed.");
 
             // check if quest information is toggled on
             bool questInfoEnabled = ChatAiSettings.Instance.ToggleQuestInfo;
@@ -974,7 +1047,7 @@ namespace ChatAi
 
 
 
-        private void HandleAction(Hero npc, AIActionEvaluator.Action action, Settlement targetSettlement = null)
+        private void HandleAction(Hero npc, AIActionEvaluator.Action action, Settlement targetSettlement = null, int hiringCost = 0)
         {
             // fetch if ai driven actions are enabled
             bool aiDrivenActions = ChatAiSettings.Instance.ToggleAIActions;
@@ -1013,6 +1086,53 @@ namespace ChatAi
 
                 case AIActionEvaluator.Action.DeliverMessage:
                     behaviorLogic.DeliverMessage(npc);
+                    break;
+
+                case AIActionEvaluator.Action.JoinParty:
+                    LogMessage($"DEBUG: Processing JoinParty action for NPC {npc.Name}.");
+                    bool success = behaviorLogic.JoinPlayerParty(npc);
+                    if (success)
+                    {
+                        LogMessage($"DEBUG: NPC {npc.Name} successfully joined player's party.");
+                        InformationManager.DisplayMessage(new InformationMessage($"{npc.Name} has agreed to join your party!"));
+                    }
+                    else
+                    {
+                        LogMessage($"DEBUG: NPC {npc.Name} failed to join player's party.");
+                        InformationManager.DisplayMessage(new InformationMessage($"{npc.Name} is unable to join your party at this time."));
+                    }
+                    break;
+                    
+                case AIActionEvaluator.Action.AcceptJoinOffer:
+                    LogMessage($"DEBUG: Processing AcceptJoinOffer action for NPC {npc.Name} with cost {hiringCost}.");
+                    if (hiringCost > 0)
+                    {
+                        // First check if player can afford
+                        if (!behaviorLogic.CanPlayerAffordHiring(hiringCost))
+                        {
+                            LogMessage($"DEBUG: Player cannot afford hire cost of {hiringCost}. Current gold: {Hero.MainHero.Gold}");
+                            InformationManager.DisplayMessage(new InformationMessage($"You don't have enough money to hire {npc.Name}. You need {hiringCost} denars."));
+                            return;
+                        }
+                        
+                        // Try to join with the cost
+                        bool joinSuccess = behaviorLogic.JoinPlayerParty(npc, hiringCost);
+                        if (joinSuccess)
+                        {
+                            LogMessage($"DEBUG: NPC {npc.Name} successfully joined player's party for {hiringCost} denars.");
+                            InformationManager.DisplayMessage(new InformationMessage($"You paid {hiringCost} denars, and {npc.Name} has joined your party!"));
+                        }
+                        else
+                        {
+                            LogMessage($"DEBUG: NPC {npc.Name} failed to join player's party after payment.");
+                            InformationManager.DisplayMessage(new InformationMessage($"Despite the payment, {npc.Name} was unable to join your party."));
+                        }
+                    }
+                    else
+                    {
+                        LogMessage($"DEBUG: Invalid hiring cost of {hiringCost} for {npc.Name}.");
+                        InformationManager.DisplayMessage(new InformationMessage($"There seems to be an issue with the hiring arrangement."));
+                    }
                     break;
 
                 default:
@@ -1129,7 +1249,13 @@ namespace ChatAi
             }
         }
 
-
+        // Add a method for AIActionEvaluator to access NPCContext
+        public NPCContext GetOrCreateNPCContextForAnalysis(Hero npc)
+        {
+            if (npc == null) return null;
+            return GetOrCreateNPCContext(npc);
+        }
 
     }
 }
+

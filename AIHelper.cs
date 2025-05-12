@@ -15,6 +15,7 @@ namespace ChatAi
     public static class AIHelper
     {
         private static readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+        private const string GAME_KEY = "BannerlordChatAI";
 
         private static void LogMessage(string message)
         {
@@ -79,6 +80,9 @@ namespace ChatAi
                         break;
                     case "Ollama":
                         responseText = await GetOllamaResponse(prompt);
+                        break;
+                    case "Player2":
+                        responseText = await GetPlayer2Response(prompt);
                         break;
                     default:
                         responseText = "Error: Invalid AI backend selected.";
@@ -408,6 +412,63 @@ namespace ChatAi
             public int completion_tokens { get; set; }
         }
 
+        private static async Task<string> GetPlayer2Response(string prompt)
+        {
+            try
+            {
+                var settings = ChatAiSettings.Instance;
+                string apiUrl = settings.Player2ApiUrl;
+
+                LogMessage($"DEBUG: Player2 API URL: {apiUrl}");
+
+                string endpoint = $"{apiUrl}/v1/chat/completions";
+
+                var payload = new
+                {
+                    messages = new[]
+                    {
+                        new { role = "system", content = "You are a medieval NPC in a fantasy world. Stay in character and maintain a medieval tone." },
+                        new { role = "user", content = prompt }
+                    }
+                };
+
+                var jsonPayload = JsonConvert.SerializeObject(payload);
+                LogMessage($"DEBUG: Player2 Payload: {jsonPayload}");
+
+                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+                {
+                    Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json")
+                };
+
+                // Add the game key header
+                request.Headers.Add("player2-game-key", GAME_KEY);
+
+                using var httpClient = new HttpClient();
+                var response = await httpClient.SendAsync(request);
+
+                LogMessage($"DEBUG: Player2 Response Status: {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorDetails = await response.Content.ReadAsStringAsync();
+                    LogMessage($"DEBUG: Player2 Error Response: {errorDetails}");
+                    InformationManager.DisplayMessage(new InformationMessage($"Player2 request failed with status {response.StatusCode}. Details: {errorDetails}"));
+                    return $"Error: Player2 request failed with status {response.StatusCode}. Details: {errorDetails}";
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                LogMessage($"DEBUG: Player2 Raw Response: {responseBody}");
+
+                var jsonResponse = JsonConvert.DeserializeObject<ApiResponse>(responseBody);
+
+                return jsonResponse?.choices?.FirstOrDefault()?.message?.content ?? "Error: No response received from Player2.";
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"DEBUG: Exception in GetPlayer2Response: {ex.Message}");
+                return $"Error: {ex.Message}";
+            }
+        }
 
     }
 }

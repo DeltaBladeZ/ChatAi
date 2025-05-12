@@ -104,6 +104,19 @@ namespace ChatAi
             return MessageHistory;
         }
 
+        // Get the most recent messages for AI analysis
+        public List<string> GetRecentMessages(int count)
+        {
+            // Ensure count is positive
+            if (count <= 0)
+                return new List<string>();
+                
+            // Return the last 'count' messages or all messages if there are fewer than 'count'
+            return MessageHistory
+                .Skip(Math.Max(0, MessageHistory.Count - count))
+                .ToList();
+        }
+
         private void LogMessage(string message)
         {
             try
