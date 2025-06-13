@@ -8,13 +8,13 @@ using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
 using System.Timers;
 using System.IO;
+using System.Linq;
 
 namespace ChatAi
 {
     public class Player2TextToSpeech
     {
         private static readonly HttpClient _httpClient = new HttpClient();
-        private static List<Player2Voice> _availableVoices = new List<Player2Voice>();
         private static bool _isPlaying = false;
         private static string _storedText = null;
         private static bool _storedIsFemale = false;
@@ -137,37 +137,6 @@ namespace ChatAi
             return _isHealthy;
         }
 
-        public static async Task RefreshAvailableVoices()
-        {
-            try
-            {
-                var settings = ChatAiSettings.Instance;
-                string apiUrl = settings.Player2ApiUrl;
-
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{apiUrl}/v1/tts/voices");
-                request.Headers.Add("player2-game-key", GAME_KEY);
-
-                var response = await _httpClient.SendAsync(request);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorDetails = await response.Content.ReadAsStringAsync();
-                    LogMessage($"Failed to fetch Player2 voices: {errorDetails}");
-                    return;
-                }
-
-                var responseBody = await response.Content.ReadAsStringAsync();
-                var voicesResponse = JsonConvert.DeserializeObject<VoicesResponse>(responseBody);
-                _availableVoices = voicesResponse.voices;
-
-                LogMessage($"Successfully loaded {_availableVoices.Count} Player2 voices.");
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"Error refreshing Player2 voices: {ex.Message}");
-            }
-        }
-
         public static async Task GenerateSpeech(string text, bool isFemale)
         {
             try
@@ -181,19 +150,33 @@ namespace ChatAi
                 string apiUrl = settings.Player2ApiUrl;
 
                 var voiceIds = new List<string>();
-                if (!string.IsNullOrEmpty(settings.Player2VoiceId))
+                
+                // Select the appropriate voice ID based on gender
+                string voiceId = isFemale ? settings.Player2FemaleVoiceId : settings.Player2MaleVoiceId;
+                string voiceLanguage = settings.Player2VoiceLanguage;
+                
+                // Add the selected voice ID if it's not empty
+                if (!string.IsNullOrEmpty(voiceId))
                 {
-                    voiceIds.Add(settings.Player2VoiceId);
+                    voiceIds.Add(voiceId);
+                    LogMessage($"Using {(isFemale ? "female" : "male")} voice ID: {voiceId}");
+                }
+                else
+                {
+                    LogMessage($"No voice ID set for {(isFemale ? "female" : "male")} NPCs, using default gender selection");
                 }
 
+                // Use the NPC's gender directly
+                string voiceGender = isFemale ? "female" : "male";
+                
                 var payload = new
                 {
                     play_in_app = true,
                     speed = settings.Player2TTSSpeed / 100f,
                     text = text,
-                    voice_gender = isFemale ? "female" : "male",
+                    voice_gender = voiceGender,
                     voice_ids = voiceIds,
-                    voice_language = settings.Player2VoiceLanguage
+                    voice_language = voiceLanguage
                 };
 
                 var jsonPayload = JsonConvert.SerializeObject(payload);
@@ -310,6 +293,72 @@ namespace ChatAi
         private class VoicesResponse
         {
             public List<Player2Voice> voices { get; set; } = new List<Player2Voice>();
+        }
+        
+        // Add method to refresh available voices
+        public static async void RefreshAvailableVoices()
+        {
+            try
+            {
+                InformationManager.DisplayMessage(new InformationMessage("Fetching available Player2 voices and writing to log file..."));
+                
+                var settings = ChatAiSettings.Instance;
+                string apiUrl = settings.Player2ApiUrl;
+
+                using var httpClient = new HttpClient();
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{apiUrl}/v1/tts/voices");
+                request.Headers.Add("player2-game-key", GAME_KEY);
+
+                var response = await httpClient.SendAsync(request);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorDetails = await response.Content.ReadAsStringAsync();
+                    LogMessage($"Failed to fetch Player2 voices: {errorDetails}");
+                    InformationManager.DisplayMessage(new InformationMessage("Failed to fetch Player2 voices. Make sure Player2 is downloaded from player2.game and running."));
+                    return;
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                var voicesResponse = JsonConvert.DeserializeObject<VoicesResponse>(responseBody);
+
+                if (voicesResponse?.voices != null && voicesResponse.voices.Count > 0)
+                {
+                    // Create a dedicated log file for voices
+                    string voicesLogPath = Path.Combine(Path.GetDirectoryName(_logFilePath), "player2_voices.txt");
+                    
+                    using (StreamWriter writer = new StreamWriter(voicesLogPath, false)) // 'false' to overwrite the file
+                    {
+                        writer.WriteLine($"Player2 Available Voices - {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                        writer.WriteLine("=============================================================");
+                        writer.WriteLine();
+                        
+                        foreach (var voice in voicesResponse.voices)
+                        {
+                            writer.WriteLine($"ID: {voice.id}");
+                            writer.WriteLine($"Name: {voice.name}");
+                            writer.WriteLine($"Gender: {voice.gender}");
+                            writer.WriteLine($"Language: {voice.language}");
+                            writer.WriteLine("-------------------------------------------------------------");
+                        }
+                        
+                        writer.WriteLine($"\nTotal voices available: {voicesResponse.voices.Count}");
+                    }
+                    
+                    LogMessage($"Successfully fetched {voicesResponse.voices.Count} Player2 voices and saved to {voicesLogPath}");
+                    InformationManager.DisplayMessage(new InformationMessage($"Found {voicesResponse.voices.Count} Player2 voices. List saved to player2_voices.txt"));
+                }
+                else
+                {
+                    LogMessage("No Player2 voices available");
+                    InformationManager.DisplayMessage(new InformationMessage("No Player2 voices available. Make sure Player2 is downloaded from player2.game and properly set up."));
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error refreshing Player2 voices: {ex.Message}");
+                InformationManager.DisplayMessage(new InformationMessage($"Error fetching Player2 voices: {ex.Message}"));
+            }
         }
     }
 } 

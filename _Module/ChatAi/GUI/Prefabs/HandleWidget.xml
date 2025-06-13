@@ -1,0 +1,6 @@
+<Prefab>
+  <Widget WidthSizePolicy="Fixed" HeightSizePolicy="Fixed" 
+         SuggestedWidth="20" SuggestedHeight="20" 
+         VerticalAlignment="Center" HorizontalAlignment="Center"
+         Sprite="Conversation.Scrollbar.Handle" />
+</Prefab> 

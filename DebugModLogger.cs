@@ -36,6 +36,103 @@ namespace ChatAi
             }
         }
 
+        // New method to check if Player2 is available and display helpful messages
+        public async Task<bool> CheckPlayer2Availability(bool displayMessages = true)
+        {
+            try
+            {
+                var settings = ChatAiSettings.Instance;
+                string apiUrl = settings.Player2ApiUrl;
+                
+                LogMessage("[DEBUG] Checking Player2 availability at URL: " + apiUrl);
+                
+                using var httpClient = new HttpClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(5); // Short timeout to avoid long waits
+                
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{apiUrl}/v1/health");
+                request.Headers.Add("player2-game-key", "BannerlordChatAI");
+                
+                var response = await httpClient.SendAsync(request);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    LogMessage("[INFO] Player2 is running and responding correctly");
+                    if (displayMessages)
+                    {
+                        InformationManager.DisplayMessage(new InformationMessage("Player2 connection successful! AI services are ready."));
+                    }
+                    return true;
+                }
+                else
+                {
+                    var errorDetails = await response.Content.ReadAsStringAsync();
+                    LogMessage($"[ERROR] Player2 responded with error: {response.StatusCode} - {errorDetails}");
+                    
+                    if (displayMessages)
+                    {
+                        ShowPlayer2ErrorMessage("Player2 is responding, but with errors. Please check the mod_log.txt file for details.");
+                    }
+                    return false;
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                LogMessage($"[ERROR] Cannot connect to Player2: {ex.Message}");
+                
+                if (displayMessages)
+                {
+                    ShowPlayer2ErrorMessage(
+                        "Cannot connect to Player2. Please make sure:\n" +
+                        "1. Player2 is downloaded and installed from player2.game\n" +
+                        "2. Player2 is currently running\n" +
+                        "3. API URL is correct (default: http://localhost:4315)"
+                    );
+                }
+                return false;
+            }
+            catch (TaskCanceledException)
+            {
+                LogMessage("[ERROR] Connection to Player2 timed out");
+                
+                if (displayMessages)
+                {
+                    ShowPlayer2ErrorMessage(
+                        "Connection to Player2 timed out. Please make sure:\n" +
+                        "1. Player2 is running\n" +
+                        "2. Your firewall isn't blocking the connection"
+                    );
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"[ERROR] Unexpected error checking Player2 availability: {ex.Message}");
+                
+                if (displayMessages)
+                {
+                    ShowPlayer2ErrorMessage("Unexpected error connecting to Player2. Check mod_log.txt for details.");
+                }
+                return false;
+            }
+        }
+        
+        private void ShowPlayer2ErrorMessage(string message)
+        {
+            // First log the message
+            LogMessage($"[PLAYER2-ERROR] {message}");
+            
+            // Then show a popup with download information
+            InformationManager.ShowInquiry(
+                new InquiryData(
+                    "Player2 Connection Issue", 
+                    $"{message}\n\n" +
+                    "Player2 is required for AI responses and/or voice when selected in settings.\n\n" +
+                    "You can download Player2 from: player2.game",
+                    true, false, "OK", null, null, null
+                )
+            );
+        }
+
         // check if the mod is steam version or nexus version by checking the path
         public bool IsSteamVersion()
         {
@@ -102,8 +199,8 @@ namespace ChatAi
                 LogMessage($"Female Voice: {settings.FemaleVoice}");
 
                 LogMessage($"Player2 API URL: {settings.Player2ApiUrl}");
-                LogMessage($"Player2 Voice ID: {(string.IsNullOrEmpty(settings.Player2VoiceId) ? "Not Set" : "Set")}");
-                LogMessage($"Player2 Voice Gender: {GetDropdownValue(settings.Player2VoiceGender)}");
+                LogMessage($"Player2 Male Voice ID: {(string.IsNullOrEmpty(settings.Player2MaleVoiceId) ? "Not Set" : settings.Player2MaleVoiceId)}");
+                LogMessage($"Player2 Female Voice ID: {(string.IsNullOrEmpty(settings.Player2FemaleVoiceId) ? "Not Set" : settings.Player2FemaleVoiceId)}");
                 LogMessage($"Player2 Voice Language: {settings.Player2VoiceLanguage}");
                 LogMessage($"Player2 TTS Speed: {settings.Player2TTSSpeed}");
                 LogMessage($"Player2 TTS Volume: {settings.Player2TTSVolume}");

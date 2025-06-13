@@ -47,8 +47,53 @@ namespace ChatAi
             if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Player2" || 
                 ChatAiSettings.Instance.AIBackend?.SelectedValue == "Player2")
             {
-                Player2TextToSpeech.InitializeHealthCheck();
-                LogMessage("[DEBUG] Initialized Player2 health check.");
+                try
+                {
+                    // Initialize Player2 health check
+                    Player2TextToSpeech.InitializeHealthCheck();
+                    LogMessage("[DEBUG] Initialized Player2 health check.");
+                    
+                    // Use the new Player2 availability check method
+                    var debugLogger = new DebugModLogger();
+                    _ = Task.Run(async () => {
+                        // Wait a brief moment to allow the game to fully load
+                        await Task.Delay(2000);
+                        
+                        // Check Player2 availability and display user-friendly messages if there are issues
+                        bool isAvailable = await debugLogger.CheckPlayer2Availability();
+                        
+                        if (isAvailable)
+                        {
+                            LogMessage("[INFO] Player2 availability check successful during startup");
+                        }
+                        else
+                        {
+                            LogMessage("[WARNING] Player2 availability check failed during startup. AI and/or voice features may not work.");
+                            
+                            // Log all settings for diagnostics
+                            debugLogger.LogAllSettings();
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    LogMessage($"[ERROR] Failed to initialize Player2 health check: {ex.Message}");
+                    LogMessage("[WARNING] Player2 connectivity issues detected. Player2 must be downloaded and running for AI responses and/or voice synthesis.");
+                    
+                    // Display a more visible warning to the user
+                    InformationManager.ShowInquiry(
+                        new InquiryData(
+                            "Player2 Connection Issue", 
+                            "Player2 is selected as your AI backend or voice provider, but a connection couldn't be established.\n\n" +
+                            "Please ensure Player2 is:\n" +
+                            "1. Downloaded and installed from player2.game\n" +
+                            "2. Running in the background\n" +
+                            "3. Using the correct port (default: 4315)\n\n" +
+                            "Without Player2 running, AI responses and/or voice synthesis will not work properly.",
+                            true, false, "OK", null, null, null
+                        )
+                    );
+                }
             }
 
             // Manually register WorldEventListener
@@ -853,15 +898,33 @@ namespace ChatAi
             LogMessage($"Generating speech for NPC: {npc.Name}. Gender: {(npc.IsFemale ? "Female" : "Male")}");
 
             var settings = ChatAiSettings.Instance;
-            if (settings.VoiceBackend?.SelectedValue == "Player2")
+            try
             {
-                // Store the text for later playback
-                Player2TextToSpeech.StoreTextForPlayback(text, npc.IsFemale);
+                if (settings.VoiceBackend?.SelectedValue == "Player2")
+                {
+                    LogMessage("[DEBUG] Using Player2 for text-to-speech");
+                    
+                    try
+                    {
+                        // Store the text for later playback
+                        Player2TextToSpeech.StoreTextForPlayback(text, npc.IsFemale);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"[ERROR] Player2 TTS failed: {ex.Message}");
+                        LogMessage("[ERROR] Please ensure Player2 is downloaded from player2.game, properly installed, and running in the background.");
+                                                 InformationManager.DisplayMessage(new InformationMessage("Could not generate speech with Player2. Please ensure Player2 is downloaded from player2.game and running."));
+                    }
+                }
+                else if (settings.VoiceBackend?.SelectedValue == "Azure")
+                {
+                    var tts = new AzureTextToSpeech();
+                    await tts.GenerateSpeech(text, npc.IsFemale);
+                }
             }
-            else if (settings.VoiceBackend?.SelectedValue == "Azure")
+            catch (Exception ex)
             {
-                var tts = new AzureTextToSpeech();
-                await tts.GenerateSpeech(text, npc.IsFemale);
+                LogMessage($"[ERROR] Failed to generate speech: {ex.Message}");
             }
         }
 
@@ -871,7 +934,27 @@ namespace ChatAi
             var settings = ChatAiSettings.Instance;
             if (settings.VoiceBackend?.SelectedValue == "Player2")
             {
-                Player2TextToSpeech.PlayStoredText();
+                try
+                {
+                    Player2TextToSpeech.PlayStoredText();
+                }
+                catch (Exception ex)
+                {
+                    // Static method cannot access instance LogMessage, so we use InformationManager directly
+                    InformationManager.DisplayMessage(new InformationMessage("Failed to play speech with Player2. Please ensure Player2 is downloaded from player2.game and running."));
+                    
+                    // Try to write to a log file directly (simplified version)
+                    try 
+                    {
+                        string logPath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+                        File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - [ERROR] Player2 speech playback failed: {ex.Message}\n");
+                        File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - [ERROR] Please ensure Player2 is downloaded from player2.game, properly installed, and running in the background.\n");
+                    }
+                    catch 
+                    {
+                        // Silently fail if we can't write to the log
+                    }
+                }
             }
         }
 
@@ -978,12 +1061,47 @@ namespace ChatAi
 
             // Prompt Generation
             string prompt = GeneratePrompt(npc, extraPromptInfo.Length > 0 ? extraPromptInfo : confirmationMessage);
-            string response = await AIHelper.GetResponse(prompt);
-
-            if (string.IsNullOrWhiteSpace(response))
+            string response = "";
+            
+            try 
             {
-                response = "Sorry, I couldn't understand that.";
-                LogMessage("Empty AI response. Default used.");
+                // Check if using Player2 as AI backend
+                if (ChatAiSettings.Instance.AIBackend?.SelectedValue == "Player2")
+                {
+                    LogMessage("[DEBUG] Using Player2 as AI backend for response generation");
+                }
+                
+                response = await AIHelper.GetResponse(prompt);
+                
+                if (string.IsNullOrWhiteSpace(response))
+                {
+                    if (ChatAiSettings.Instance.AIBackend?.SelectedValue == "Player2")
+                    {
+                        LogMessage("[ERROR] Empty response received from Player2. Please ensure Player2 is downloaded from player2.game and running in the background.");
+                        InformationManager.DisplayMessage(new InformationMessage("No response from Player2. Make sure Player2 is downloaded from player2.game and running in the background."));
+                        response = "I apologize, but I cannot respond at the moment. There may be an issue with the connection to Player2. Please ensure Player2 is downloaded from player2.game and running.";
+                    }
+                    else 
+                    {
+                        response = "Sorry, I couldn't understand that.";
+                        LogMessage("[ERROR] Empty AI response. Default used.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"[ERROR] Failed to get AI response: {ex.Message}");
+                
+                if (ChatAiSettings.Instance.AIBackend?.SelectedValue == "Player2")
+                {
+                    LogMessage("[ERROR] Player2 error detected. Ensure Player2 is downloaded from player2.game, properly installed, and running in the background.");
+                    InformationManager.DisplayMessage(new InformationMessage("Error connecting to Player2. Please make sure Player2 is downloaded from player2.game and running."));
+                    response = "I apologize, but there seems to be a technical issue with Player2. Please ensure Player2 is downloaded from player2.game and running in the background.";
+                }
+                else
+                {
+                    response = "Sorry, I'm having trouble responding right now.";
+                }
             }
 
             // Add the AI's response to the conversation history
