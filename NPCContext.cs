@@ -10,7 +10,7 @@ namespace ChatAi
     [Serializable]
     public class NPCContext
     {
-        private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+        private readonly string _logFilePath = PathHelper.GetModFilePath("mod_log.txt");
 
         private Dictionary<string, Func<string>> _dynamicStats = new(); // Runtime-only dynamic stats
         private List<string> _messageHistory = new(); // Initialize _messageHistory
@@ -128,13 +128,14 @@ namespace ChatAi
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
 
-                // Ensure log directory exists
+                // Use PathHelper to get the correct log file path
                 string logFilePath = _logFilePath;
                 string logDirectory = Path.GetDirectoryName(logFilePath);
 
-                if (!Directory.Exists(logDirectory))
+                // Ensure the log directory exists
+                if (!string.IsNullOrEmpty(logDirectory))
                 {
-                    Directory.CreateDirectory(logDirectory);
+                    PathHelper.EnsureDirectoryExists(logDirectory);
                 }
 
                 File.AppendAllText(logFilePath, logMessage);

@@ -14,7 +14,7 @@ namespace ChatAi
 {
     public static class AIHelper
     {
-        private static readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+        private static readonly string _logFilePath = PathHelper.GetModFilePath("mod_log.txt");
         private const string GAME_KEY = "BannerlordChatAI";
 
         private static void LogMessage(string message)
@@ -29,22 +29,14 @@ namespace ChatAi
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
 
-                // Determine the log file path dynamically
-                string logFilePath = _logFilePath; // Default path
+                // Use PathHelper to get the correct log file path
+                string logFilePath = _logFilePath;
                 string logDirectory = Path.GetDirectoryName(logFilePath);
 
-                if (!Directory.Exists(logDirectory))
+                // Ensure the log directory exists
+                if (!string.IsNullOrEmpty(logDirectory))
                 {
-                    // If the directory does not exist, fall back to the desktop
-                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
-
-                    if (!Directory.Exists(desktopLogDirectory))
-                    {
-                        Directory.CreateDirectory(desktopLogDirectory);
-                    }
-
-                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                    PathHelper.EnsureDirectoryExists(logDirectory);
                 }
 
                 // Write the log message to the file

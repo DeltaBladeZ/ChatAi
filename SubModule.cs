@@ -1,4 +1,5 @@
 ﻿using MCM.Abstractions.Base.Global;
+using System;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
@@ -40,5 +41,7 @@ namespace ChatAi
             base.OnBeforeInitialModuleScreenSetAsRoot();
             InformationManager.DisplayMessage(new InformationMessage("ChatAi: Mod loaded!"));
         }
+
+        
     }
 }

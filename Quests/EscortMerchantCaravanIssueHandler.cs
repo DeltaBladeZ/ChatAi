@@ -9,7 +9,7 @@ namespace ChatAi.Quests
 {
     public class EscortMerchantCaravanHandler : IQuestHandler
     {
-        private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+        private readonly string _logFilePath = PathHelper.GetModFilePath("mod_log.txt");
 
         public bool HandleQuest(IssueBase issue, Hero npc)
         {
@@ -94,8 +94,26 @@ namespace ChatAi.Quests
         {
             try
             {
+                // Check if debug logging is enabled in the settings
+                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                {
+                    return; // Skip logging if disabled
+                }
+
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Use PathHelper to get the correct log file path
+                string logFilePath = _logFilePath;
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                // Ensure the log directory exists
+                if (!string.IsNullOrEmpty(logDirectory))
+                {
+                    PathHelper.EnsureDirectoryExists(logDirectory);
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {

@@ -10,7 +10,6 @@ using System;
 using TaleWorlds.Engine;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.Library;
-using System.Diagnostics;
 
 
 namespace ChatAi
@@ -56,6 +55,10 @@ namespace ChatAi
         [SettingPropertyBool("Enable World Event Tracking", RequireRestart = false, HintText = "Toggle whether world events (such as family deaths, clan leader changes, ect) are tracked and passed to related NPCs.")]
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public bool ToggleWorldEvents { get; set; } = true;
+
+        [SettingPropertyBool("Enable Equipment Information", RequireRestart = false, HintText = "Include concise armor and weapon descriptions for the NPC and the player in the prompt.")]
+        [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
+        public bool ToggleEquipmentInfo { get; set; } = true;
 
         // OpenAI Settings Group
         [SettingPropertyText("OpenAI API Key", RequireRestart = false, HintText = "Enter your OpenAI API key here.")]
@@ -163,7 +166,7 @@ namespace ChatAi
         public int MaxHistoryLength { get; set; } = 5;
 
         // Version Section, show current mod version, then if press button open nexus mod page with version 
-        [SettingPropertyButton("Current Version: 0.2.2", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
+        [SettingPropertyButton("Current Version: 0.2.3", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
         [SettingPropertyGroup("Version", GroupOrder = 10)]
         public Action CheckForUpdates { get; set; } = (() =>
         {
@@ -274,8 +277,8 @@ namespace ChatAi
         {
             try
             {
-                // Use BasePath.Name to construct the mod directory path
-                string modFolderPath = System.IO.Path.Combine(BasePath.Name, "Modules", "ChatAi");
+                // Use PathHelper to get the correct mod directory path
+                string modFolderPath = PathHelper.GetModFolderPath();
 
                 if (Directory.Exists(modFolderPath))
                 {

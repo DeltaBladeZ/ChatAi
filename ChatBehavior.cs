@@ -17,25 +17,17 @@ using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.ScreenSystem;
 using TaleWorlds.SaveSystem.Load;
 
-
-
-
-
 namespace ChatAi
 {
     public class ChatBehavior : CampaignBehaviorBase
     {
-
-
-
         private static ChatBehavior _instance;
         public static ChatBehavior Instance => _instance ??= new ChatBehavior();
 
-        private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+        private readonly string _logFilePath = PathHelper.GetModFilePath("mod_log.txt");
 
-        private readonly string _saveDataPath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "save_data");
+        private readonly string _saveDataPath = PathHelper.GetModFolderPath("save_data");
         private string _currentSaveFolder;
-
 
         // Dictionary to store NPC contexts with timestamp of when they were loaded
         private Dictionary<string, (NPCContext context, DateTime loadTime)> _npcContexts = new Dictionary<string, (NPCContext, DateTime)>();
@@ -172,7 +164,6 @@ namespace ChatAi
             }
         }
 
-
         public override void SyncData(IDataStore dataStore)
         {
 
@@ -187,9 +178,12 @@ namespace ChatAi
                 string saveFolderName = Campaign.Current.UniqueGameId.ToString();
                 LogMessage($"[DEBUG] Current Campaign ID: {saveFolderName}");
 
-                // Create the full path
+                // Create the full path using PathHelper
                 string saveFolderPath = Path.Combine(_saveDataPath, saveFolderName);
                 LogMessage($"[DEBUG] Computed save folder path: {saveFolderPath}");
+
+                // Ensure the save_data directory exists
+                PathHelper.EnsureDirectoryExists(_saveDataPath);
 
                 // Check if directory already exists
                 if (!Directory.Exists(saveFolderPath))
@@ -202,17 +196,15 @@ namespace ChatAi
                     LogMessage($"[DEBUG] Save directory already exists: {saveFolderPath}");
                 }
 
+                _currentSaveFolder = saveFolderPath;
                 return saveFolderPath;
             }
             catch (Exception ex)
             {
                 LogMessage($"[ERROR] Failed to get active save directory: {ex.Message}");
-                LogMessage($"[ERROR] StackTrace: {ex.StackTrace}");
-
                 return _saveDataPath; // Default to the main save_data folder if error occurs
             }
         }
-
 
         private void SaveNPCContext(string npcId, Hero npc, NPCContext context)
         {
@@ -273,11 +265,6 @@ namespace ChatAi
             }
         }
 
-
-
-
-
-
         private NPCContext LoadNPCContext(string npcId)
         {
             try
@@ -336,8 +323,6 @@ namespace ChatAi
             // If no file was found or deserialization failed, return a new context
             return new NPCContext { Name = "Unknown_NPC" };
         }
-
-
 
         private string GetCurrentDate()
         {
@@ -431,7 +416,6 @@ namespace ChatAi
             return loadedContext;
         }
 
-
         private void UpdateNPCStats(NPCContext context, Hero npc)
         {
             // Store in both Dynamic and Static Stats
@@ -480,10 +464,6 @@ namespace ChatAi
             context.AddDynamicStat("Spouse", () => npc.Spouse?.Name?.ToString() ?? "None");
             context.AddStaticStat("Spouse", npc.Spouse?.Name?.ToString() ?? "None");
         }
-
-
-
-
 
         private string GetPersonalityDescription(Hero npc)
         {
@@ -540,7 +520,6 @@ namespace ChatAi
                 return $"in the {settlementType} of {Hero.MainHero.CurrentSettlement.Name}, part of the kingdom of {kingdom}";
             }
 
-
             // If the player is on the world map, use their MobileParty position
             if (Hero.MainHero.PartyBelongedTo != null)
             {
@@ -562,7 +541,6 @@ namespace ChatAi
             return "in an unknown location";
         }
 
-
         private string GetSettlementType(Settlement settlement)
         {
             if (settlement.IsTown) return "town";
@@ -575,8 +553,6 @@ namespace ChatAi
         private string GeneratePrompt(Hero npc, string confirmationMessage = "")
         {
             NPCContext context = GetOrCreateNPCContext(npc);
-
-
 
             string playerName = Hero.MainHero?.Name?.ToString() ?? "Stranger";
             string playerLocation = GetPlayerLocation();
@@ -592,7 +568,6 @@ namespace ChatAi
             foreach (var stat in context.GetAllStats())
             {
                 prompt += $"\n{stat.Key}: {stat.Value}\n\n";
-
             }
 
             // Retrieve and include relationship change feedback
@@ -625,38 +600,9 @@ namespace ChatAi
                 var quests = questManager.GetQuestsForNPC(npc);
             }
 
-
-
-
-
-            //BROKEN CODE FIX LATER
-            //        foreach (var quest in quests)
-            //       {
-            //            if (quest is EscortMerchantCaravanIssueBehavior.EscortMerchantCaravanIssue escortIssue)
-            //           {
-            //                 LogMessage($"DEBUG: Checking quest conditions for NPC {npc.Name}.");
-            //                MethodInfo conditionsMethod = typeof(EscortMerchantCaravanIssueBehavior.EscortMerchantCaravanIssue)
-            //                     .GetMethod("CanPlayerTakeQuestConditions", BindingFlags.Instance | BindingFlags.NonPublic);
-            //
-            //      if (conditionsMethod != null)
-            //      {
-            //           //          object[] parameters = { npc, null, null, null };
-            //          bool canAccept = (bool)conditionsMethod.Invoke(escortIssue, parameters);
-            //          LogMessage($"DEBUG: Quest conditions check result: {canAccept}");
-            //
-            //         if (!canAccept && parameters[1] is string reason)
-            //             LogMessage($"DEBUG: Quest rejection reason: {reason}");
-            //        {
-            //            prompt += $"\n\nYou can not let the player accept your quest due to this reason: {reason}";
-            //      }
-            //  }
-            //    }
-            //  }
-
-
             if (ChatAiSettings.Instance.ToggleWorldEvents)
-                LogMessage($"DEBUG: World events are enabled.");
             {
+                LogMessage($"DEBUG: World events are enabled.");
                 List<string> recentEvents = WorldEventListener.GetEventsForNPC(npc);
                 WorldEventTracker.LogMessage($"[DEBUG] Events for {npc.Name}: {string.Join(", ", recentEvents)}");
 
@@ -671,6 +617,12 @@ namespace ChatAi
                 }
             }
 
+            // Inject compact world-state prompt hints (e.g., prisoner status)
+            string worldStateHints = WorldPromptHints.GetHintsForNPC(npc);
+            if (!string.IsNullOrWhiteSpace(worldStateHints))
+            {
+                prompt += $"\n\nAdditional situational context:\n{worldStateHints}\n";
+            }
 
             prompt += "\n\nRecent conversation history:\n";
             prompt += context.GetFormattedHistory();
@@ -684,14 +636,25 @@ namespace ChatAi
                 prompt += $"\n\nExtra Instructions or Context:{customPrompt}";
             }
 
-
-
             // Instructions for response style
             prompt += "\n\nInstructions:\n";
             prompt += "- Answer the player's latest question or comment, in character and with the correct personality.\n";
             prompt += "- Do not reference the AI, modern concepts, or anything outside this world.\n";
             prompt += "- Use the information provided to craft a response that fits the medieval fantasy setting. \n";
             prompt += "- Act in a way that fits your character's personality and traits.\n";
+
+            // Equipment info (optional)
+            if (ChatAiSettings.Instance.ToggleEquipmentInfo)
+            {
+                try
+                {
+                    string npcEquip = OutfitSummaryBuilder.BuildOutfitSummary(npc);
+                    string playerEquip = OutfitSummaryBuilder.BuildOutfitSummary(Hero.MainHero);
+                    prompt += $"\nYour Equipment: {npcEquip}\n";
+                    prompt += $"The Player's Equipment: {playerEquip}\n";
+                }
+                catch { }
+            }
             if (longerResponses)
             {
                 prompt += "- Provide a long 2-3 paragraph, detailed and immersive response, that responds to the player.\n";
@@ -706,10 +669,6 @@ namespace ChatAi
                 prompt += "- If you offer any quest, try to convince the player to accept it, while also making sure to respond to the latest response by the player. If you don't have a current quest don't mention anything about quests.\n";
             }
 
-
-
-
-
             if (!string.IsNullOrEmpty(confirmationMessage))
             {
                 prompt += $"\n\nExtra Instruction: {confirmationMessage}";
@@ -722,12 +681,8 @@ namespace ChatAi
             return prompt;
         }
 
-
-
         public void AddDialogs(CampaignGameStarter starter)
         {
-           
-
             try
             {
                 string variableName = "DYNAMIC_NPC_RESPONSE";
@@ -739,8 +694,6 @@ namespace ChatAi
                     MBTextManager.SetTextVariable(variableName, defaultValue);
                     
                 }
-
-
 
                 // Start Chat Option
                 SafeAddPlayerLine(
@@ -778,7 +731,6 @@ namespace ChatAi
 
                     }
                 );
-
 
                 // NPC's Thinking Placeholder
                 SafeAddDialogLine(
@@ -828,9 +780,11 @@ namespace ChatAi
                     () =>
                     {
                         if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Azure")
+                        {
                             LogMessage("Player ended the conversation. Cancelling playback...");
                             AzureTextToSpeech.CancelPlayback();
-                        
+                        }
+
 
                     }
                 );
@@ -857,7 +811,6 @@ namespace ChatAi
         private AIActionEvaluator _actionEvaluator = new AIActionEvaluator();
 
         private NPCBehaviorLogic _npcBehaviorLogic = new NPCBehaviorLogic();
-
 
         private void LogQuestDetails(IssueBase quest)
         {
@@ -946,7 +899,7 @@ namespace ChatAi
                     // Try to write to a log file directly (simplified version)
                     try 
                     {
-                        string logPath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+                        string logPath = PathHelper.GetModFilePath("mod_log.txt");
                         File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - [ERROR] Player2 speech playback failed: {ex.Message}\n");
                         File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - [ERROR] Please ensure Player2 is downloaded from player2.game, properly installed, and running in the background.\n");
                     }
@@ -960,16 +913,11 @@ namespace ChatAi
 
         private async Task HandlePlayerInput()
         {
-
             // Fetch the player's input
             string userInput = await TextInput("Type your message to the NPC");
             if (userInput != null) {
                 userInput = userInput.Trim();
             }
-
-
-
-
 
             LogMessage($"DEBUG: Player input received: {userInput}");
 
@@ -994,9 +942,6 @@ namespace ChatAi
             context.AddMessage($"User: {userInput}");
             UpdateNPCStats(context, npc);
             SaveNPCContext(npc.StringId, npc, context); 
-
-
-
 
             InformationManager.DisplayMessage(new InformationMessage("Please wait, I am thinking!"));
 
@@ -1161,10 +1106,6 @@ namespace ChatAi
             
         }
 
-
-
-
-
         private void HandleAction(Hero npc, AIActionEvaluator.Action action, Settlement targetSettlement = null, int hiringCost = 0)
         {
             // fetch if ai driven actions are enabled
@@ -1259,11 +1200,6 @@ namespace ChatAi
             }
         }
 
-
-
-
-
-
         private Task<string> TextInput(string prompt)
         {
             var tcs = new TaskCompletionSource<string>();
@@ -1340,22 +1276,14 @@ namespace ChatAi
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
 
-                // Determine the log file path dynamically
-                string logFilePath = _logFilePath; // Default path
+                // Use PathHelper to get the correct log file path
+                string logFilePath = _logFilePath;
                 string logDirectory = Path.GetDirectoryName(logFilePath);
 
-                if (!Directory.Exists(logDirectory))
+                // Ensure the log directory exists
+                if (!string.IsNullOrEmpty(logDirectory))
                 {
-                    // If the directory does not exist, fall back to the desktop
-                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
-
-                    if (!Directory.Exists(desktopLogDirectory))
-                    {
-                        Directory.CreateDirectory(desktopLogDirectory);
-                    }
-
-                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                    PathHelper.EnsureDirectoryExists(logDirectory);
                 }
 
                 // Write the log message to the file

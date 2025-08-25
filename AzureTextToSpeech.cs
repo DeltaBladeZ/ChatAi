@@ -6,8 +6,6 @@ using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using NAudio.Wave;
 
-
-
 namespace ChatAi
 {
     public class AzureTextToSpeech
@@ -57,7 +55,8 @@ namespace ChatAi
 
                 LogDebug($"Selected voice: {voiceName}");
 
-                string audioFilePath = Path.Combine(TaleWorlds.Library.BasePath.Name, "Modules", "ChatAi", "temp_audio.wav");
+                // Save the audio to a temporary file
+                string audioFilePath = PathHelper.GetModFilePath("temp_audio.wav");
 
                 LogDebug($"Audio file will be saved to: {audioFilePath}");
 
@@ -159,23 +158,19 @@ namespace ChatAi
             });
         }
 
-
-
         /// <summary>
         /// Logs debug messages to the console or mod log.
         /// </summary>
         /// <param name="message">The debug message.</param>
         private void LogDebug(string message)
         {
-
-            string logFilePath = Path.Combine(TaleWorlds.Library.BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+            string logFilePath = PathHelper.GetModFilePath("mod_log.txt");
             try
             {
                 if (!ChatAiSettings.Instance.EnableDebugLogging)
                 {
                     return;
                 }
-
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
                 System.IO.File.AppendAllText(logFilePath, logMessage);

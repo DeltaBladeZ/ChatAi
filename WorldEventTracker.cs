@@ -48,20 +48,13 @@ namespace ChatAi
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
 
-                string logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+                string logFilePath = PathHelper.GetModFilePath("mod_log.txt");
                 string logDirectory = Path.GetDirectoryName(logFilePath);
 
-                if (!Directory.Exists(logDirectory))
+                // Ensure the log directory exists
+                if (!string.IsNullOrEmpty(logDirectory))
                 {
-                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                    string desktopLogDirectory = Path.Combine(desktopPath, "ChatAiLogs");
-
-                    if (!Directory.Exists(desktopLogDirectory))
-                    {
-                        Directory.CreateDirectory(desktopLogDirectory);
-                    }
-
-                    logFilePath = Path.Combine(desktopLogDirectory, "mod_log.txt");
+                    PathHelper.EnsureDirectoryExists(logDirectory);
                 }
 
                 File.AppendAllText(logFilePath, logMessage);

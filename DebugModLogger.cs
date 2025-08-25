@@ -15,7 +15,7 @@ namespace ChatAi
 {
     public class DebugModLogger
     {
-        private readonly string _logFilePath = Path.Combine(BasePath.Name, "Modules", "ChatAi", "mod_log.txt");
+        private readonly string _logFilePath = PathHelper.GetModFilePath("mod_log.txt");
 
         private void LogMessage(string message)
         {
@@ -28,7 +28,19 @@ namespace ChatAi
                 }
 
                 string logMessage = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n";
-                File.AppendAllText(_logFilePath, logMessage);
+
+                // Use PathHelper to get the correct log file path
+                string logFilePath = _logFilePath;
+                string logDirectory = Path.GetDirectoryName(logFilePath);
+
+                // Ensure the log directory exists
+                if (!string.IsNullOrEmpty(logDirectory))
+                {
+                    PathHelper.EnsureDirectoryExists(logDirectory);
+                }
+
+                // Write the log message to the file
+                File.AppendAllText(logFilePath, logMessage);
             }
             catch (Exception ex)
             {
