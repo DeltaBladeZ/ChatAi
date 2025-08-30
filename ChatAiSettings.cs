@@ -60,6 +60,10 @@ namespace ChatAi
         [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
         public bool ToggleEquipmentInfo { get; set; } = true;
 
+        [SettingPropertyBool("Enable TTS Ignore Asterisk", RequireRestart = false, HintText = "If enabled, TTS will not read content inside asterisks (e.g., *nods*).")]
+        [SettingPropertyGroup("API Settings/Main Settings", GroupOrder = 0)]
+        public bool SkipStageDirectionsInTTS { get; set; } = true;
+
         // OpenAI Settings Group
         [SettingPropertyText("OpenAI API Key", RequireRestart = false, HintText = "Enter your OpenAI API key here.")]
         [SettingPropertyGroup("API Settings/OpenAI Settings", GroupOrder = 3)]
@@ -166,7 +170,7 @@ namespace ChatAi
         public int MaxHistoryLength { get; set; } = 5;
 
         // Version Section, show current mod version, then if press button open nexus mod page with version 
-        [SettingPropertyButton("Current Version: 0.2.3", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
+        [SettingPropertyButton("Current Version: 0.2.4", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
         [SettingPropertyGroup("Version", GroupOrder = 10)]
         public Action CheckForUpdates { get; set; } = (() =>
         {

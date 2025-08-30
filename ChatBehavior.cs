@@ -16,6 +16,7 @@ using ChatAi.Quests;
 using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.ScreenSystem;
 using TaleWorlds.SaveSystem.Load;
+using System.Text.RegularExpressions;
 
 namespace ChatAi
 {
@@ -422,8 +423,8 @@ namespace ChatAi
             context.AddDynamicStat("Title/Occupation", () => npc.Occupation.ToString());
             context.AddStaticStat("Title/Occupation", npc.Occupation.ToString());
 
-            context.AddDynamicStat("Fief", () => npc.CurrentSettlement?.Name?.ToString() ?? "No fief");
-            context.AddStaticStat("Fief", npc.CurrentSettlement?.Name?.ToString() ?? "No fief");
+            context.AddDynamicStat("Fief", () => GetHeroFiefsDisplay(npc));
+            context.AddStaticStat("Fief", GetHeroFiefsDisplay(npc));
 
             context.AddDynamicStat("Relationship with player", () => npc.GetRelationWithPlayer().ToString());
             context.AddStaticStat("Relationship with player", npc.GetRelationWithPlayer().ToString());
@@ -463,6 +464,52 @@ namespace ChatAi
 
             context.AddDynamicStat("Spouse", () => npc.Spouse?.Name?.ToString() ?? "None");
             context.AddStaticStat("Spouse", npc.Spouse?.Name?.ToString() ?? "None");
+        }
+
+        private static List<Settlement> GetHeroFiefs(Hero hero)
+        {
+            var fiefs = new List<Settlement>();
+            try
+            {
+                if (hero?.GovernorOf != null)
+                {
+                    var govSettlement = hero.GovernorOf.Owner?.Settlement ?? hero.GovernorOf.Settlement;
+                    if (govSettlement != null)
+                    {
+                        fiefs.Add(govSettlement);
+                    }
+                }
+
+                foreach (var s in Settlement.All)
+                {
+                    if ((s.IsTown || s.IsCastle) && s.Town?.Governor == hero && !fiefs.Contains(s))
+                    {
+                        fiefs.Add(s);
+                    }
+                }
+
+                if (hero?.Clan?.Leader == hero)
+                {
+                    foreach (var s in Settlement.All)
+                    {
+                        if ((s.IsTown || s.IsCastle) && s.OwnerClan == hero.Clan && !fiefs.Contains(s))
+                        {
+                            fiefs.Add(s);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return fiefs;
+        }
+
+        private static string GetHeroFiefsDisplay(Hero hero)
+        {
+            var fiefs = GetHeroFiefs(hero);
+            if (fiefs.Count == 0) return "No fief";
+            var names = fiefs.Select(s => s?.Name?.ToString()).Where(n => !string.IsNullOrWhiteSpace(n));
+            var joined = string.Join(", ", names);
+            return string.IsNullOrWhiteSpace(joined) ? "No fief" : joined;
         }
 
         private string GetPersonalityDescription(Hero npc)
@@ -853,6 +900,7 @@ namespace ChatAi
             var settings = ChatAiSettings.Instance;
             try
             {
+                string ttsText = settings.SkipStageDirectionsInTTS ? SanitizeForTTS(text) : (text ?? string.Empty);
                 if (settings.VoiceBackend?.SelectedValue == "Player2")
                 {
                     LogMessage("[DEBUG] Using Player2 for text-to-speech");
@@ -860,7 +908,7 @@ namespace ChatAi
                     try
                     {
                         // Store the text for later playback
-                        Player2TextToSpeech.StoreTextForPlayback(text, npc.IsFemale);
+                        Player2TextToSpeech.StoreTextForPlayback(ttsText, npc.IsFemale);
                     }
                     catch (Exception ex)
                     {
@@ -872,13 +920,29 @@ namespace ChatAi
                 else if (settings.VoiceBackend?.SelectedValue == "Azure")
                 {
                     var tts = new AzureTextToSpeech();
-                    await tts.GenerateSpeech(text, npc.IsFemale);
+                    await tts.GenerateSpeech(ttsText, npc.IsFemale);
                 }
             }
             catch (Exception ex)
             {
                 LogMessage($"[ERROR] Failed to generate speech: {ex.Message}");
             }
+        }
+
+        private string SanitizeForTTS(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                return input ?? string.Empty;
+            }
+
+            // Remove content inside asterisk pairs, e.g., *nods* or *waves at you*
+            string withoutStageDirections = Regex.Replace(input, "\\*[^*]*\\*", string.Empty);
+
+            // Collapse multiple whitespace into a single space and trim
+            withoutStageDirections = Regex.Replace(withoutStageDirections, "\\s{2,}", " ").Trim();
+
+            return withoutStageDirections;
         }
 
         // Add this method to handle the continue click
