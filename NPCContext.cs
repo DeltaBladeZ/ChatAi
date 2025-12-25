@@ -121,7 +121,7 @@ namespace ChatAi
         {
             try
             {
-                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                if (!SettingsUtil.IsDebugLoggingEnabled())
                 {
                     return;
                 }

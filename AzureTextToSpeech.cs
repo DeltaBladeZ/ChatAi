@@ -167,7 +167,7 @@ namespace ChatAi
             string logFilePath = PathHelper.GetModFilePath("mod_log.txt");
             try
             {
-                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                if (!SettingsUtil.IsDebugLoggingEnabled())
                 {
                     return;
                 }

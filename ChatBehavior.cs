@@ -13,7 +13,6 @@ using Newtonsoft.Json;
 using System.Reflection;
 using TaleWorlds.CampaignSystem.Issues;
 using ChatAi.Quests;
-using TaleWorlds.Engine.GauntletUI;
 using TaleWorlds.ScreenSystem;
 using TaleWorlds.SaveSystem.Load;
 using System.Text.RegularExpressions;
@@ -24,6 +23,9 @@ namespace ChatAi
     {
         private static ChatBehavior _instance;
         public static ChatBehavior Instance => _instance ??= new ChatBehavior();
+
+		private System.Threading.CancellationTokenSource _uiDebugWatcherCts;
+		private string _lastTopScreenName = "";
 
         private readonly string _logFilePath = PathHelper.GetModFilePath("mod_log.txt");
 
@@ -36,9 +38,25 @@ namespace ChatAi
         {
             LogMessage("[DEBUG] Registering ChatBehavior...");
 
+            // Always register world events (independent of settings availability)
+            try
+            {
+                // Manually register WorldEventListener
+                WorldEventListener worldEventListener = new WorldEventListener();
+                worldEventListener.RegisterEvents();
+            }
+            catch
+            {
+                // Fail closed
+            }
+
+            // Settings may not be initialized yet on older Bannerlord versions.
+            var settings = SettingsUtil.TryGet();
+
             // Initialize Player2 health check if Player2 is selected as either voice or AI backend
-            if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Player2" || 
-                ChatAiSettings.Instance.AIBackend?.SelectedValue == "Player2")
+            if (settings != null &&
+                (settings.VoiceBackend?.SelectedValue == "Player2" ||
+                 settings.AIBackend?.SelectedValue == "Player2"))
             {
                 try
                 {
@@ -89,10 +107,83 @@ namespace ChatAi
                 }
             }
 
-            // Manually register WorldEventListener
-            WorldEventListener worldEventListener = new WorldEventListener();
-            worldEventListener.RegisterEvents();
+			// Start UI screen debug watcher if enabled
+			if (settings != null && settings.EnableUIScreenDebugLogs)
+			{
+				StartUiDebugWatcher();
+			}
         }
+
+		private void StartUiDebugWatcher()
+		{
+			try
+			{
+				_uiDebugWatcherCts?.Cancel();
+				_uiDebugWatcherCts = new System.Threading.CancellationTokenSource();
+				var token = _uiDebugWatcherCts.Token;
+				_ = Task.Run(async () =>
+				{
+					while (!token.IsCancellationRequested)
+					{
+						try
+						{
+							string top = ScreenManager.TopScreen?.GetType().Name ?? "null";
+							if (!string.Equals(top, _lastTopScreenName, StringComparison.Ordinal))
+							{
+								_lastTopScreenName = top;
+								LogTopScreenInfo("[Watcher]");
+							}
+						}
+						catch (Exception ex)
+						{
+							LogMessage($"[UI] Watcher error: {ex.Message}");
+						}
+						await Task.Delay(250, token);
+					}
+				}, token);
+				LogMessage("[UI] Screen watcher started.");
+			}
+			catch (Exception ex)
+			{
+				LogMessage($"[UI] Failed to start screen watcher: {ex.Message}");
+			}
+		}
+
+		public void LogTopScreenInfo(string tag = "")
+		{
+			try
+			{
+				var top = ScreenManager.TopScreen;
+				string topName = top?.GetType().FullName ?? "null";
+				LogMessage($"{tag} TopScreen={topName}");
+
+				// Attempt to enumerate layers via reflection
+				if (top != null)
+				{
+					var layersField = typeof(ScreenBase).GetField("_layers", BindingFlags.Instance | BindingFlags.NonPublic);
+					var layers = layersField?.GetValue(top) as System.Collections.IEnumerable;
+					if (layers != null)
+					{
+						int i = 0;
+						foreach (var layer in layers)
+						{
+							string lname = layer?.GetType().FullName ?? "null";
+							LogMessage($"{tag} Layer[{i}]={lname}");
+							i++;
+						}
+					}
+					else
+					{
+						LogMessage($"{tag} Could not reflect layers on TopScreen.");
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				LogMessage($"[UI] LogTopScreenInfo error: {ex.Message}");
+			}
+		}
+		// Overlay UI for STT was removed in favor of using the conversation options directly.
 
         public void ClearAllNPCData()
         {
@@ -567,22 +658,37 @@ namespace ChatAi
                 return $"in the {settlementType} of {Hero.MainHero.CurrentSettlement.Name}, part of the kingdom of {kingdom}";
             }
 
-            // If the player is on the world map, use their MobileParty position
-            if (Hero.MainHero.PartyBelongedTo != null)
-            {
-                var playerPosition = Hero.MainHero.PartyBelongedTo.Position2D;
-
-                Settlement nearestSettlement = Settlement.All
-                    .OrderBy(s => s.Position2D.Distance(playerPosition))
-                    .FirstOrDefault();
-
-                if (nearestSettlement != null)
-                {
-                    string settlementType = GetSettlementType(nearestSettlement);
-                    string kingdom = nearestSettlement.OwnerClan?.Kingdom?.Name?.ToString() ?? "no kingdom";
-                    return $"on the road near the {settlementType} of {nearestSettlement.Name}, part of the kingdom of {kingdom}";
-                }
-            }
+			// If the player is on the world map, attempt to determine nearest settlement using reflection (API-safe)
+			if (Hero.MainHero.PartyBelongedTo != null)
+			{
+				double px, py;
+				if (TryGet2DPosition(Hero.MainHero.PartyBelongedTo, out px, out py))
+				{
+					Settlement nearestSettlement = null;
+					double bestDist2 = double.MaxValue;
+					foreach (var s in Settlement.All)
+					{
+						double sx, sy;
+						if (TryGet2DPosition(s, out sx, out sy))
+						{
+							double dx = sx - px;
+							double dy = sy - py;
+							double d2 = dx * dx + dy * dy;
+							if (d2 < bestDist2)
+							{
+								bestDist2 = d2;
+								nearestSettlement = s;
+							}
+						}
+					}
+					if (nearestSettlement != null)
+					{
+						string settlementType = GetSettlementType(nearestSettlement);
+						string kingdom = nearestSettlement.OwnerClan?.Kingdom?.Name?.ToString() ?? "no kingdom";
+						return $"on the road near the {settlementType} of {nearestSettlement.Name}, part of the kingdom of {kingdom}";
+					}
+				}
+			}
 
             // Fallback for unknown location
             return "in an unknown location";
@@ -595,6 +701,127 @@ namespace ChatAi
             if (settlement.IsVillage) return "village";
             return "unknown settlement";
         }
+
+		private static bool TryGet2DPosition(object instance, out double x, out double y)
+		{
+			x = 0; y = 0;
+			if (instance == null) return false;
+			try
+			{
+				var t = instance.GetType();
+				object? posVal = null;
+
+				// 1) Prefer properties (newer builds tend to expose Position2D as a property)
+				var posProp = t.GetProperty("Position2D", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+					?? t.GetProperty("Position", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+					?? t.GetProperty("MapPosition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+				if (posProp != null)
+				{
+					posVal = posProp.GetValue(instance);
+				}
+				else
+				{
+					// 2) Fallback to fields (some older builds exposed Position2D as a field)
+					var posField = t.GetField("Position2D", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+						?? t.GetField("Position", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+						?? t.GetField("MapPosition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+					if (posField != null)
+					{
+						posVal = posField.GetValue(instance);
+					}
+					else
+					{
+						// 3) Fallback to methods (defensive: some versions may have GetPosition2D())
+						var posMethod = t.GetMethod("GetPosition2D", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null)
+							?? t.GetMethod("GetPosition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null)
+							?? t.GetMethod("GetMapPosition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+						if (posMethod != null)
+						{
+							posVal = posMethod.Invoke(instance, null);
+						}
+					}
+				}
+
+				return TryExtractXY(posVal, out x, out y);
+			}
+			catch { return false; }
+		}
+
+		private static bool TryExtractXY(object? vectorObj, out double x, out double y)
+		{
+			x = 0; y = 0;
+			if (vectorObj == null) return false;
+			try
+			{
+				var vt = vectorObj.GetType();
+
+				// Common variants across Bannerlord builds / TaleWorlds structs:
+				// - Properties: X/Y or x/y
+				// - Fields: x/y or X/Y
+				// - Sometimes a 3D vector is used (X/Z or x/z); treat Z as Y for map coords if Y is missing.
+
+				static bool TryGetNumber(Type type, object obj, string name, out double val)
+				{
+					val = 0;
+					try
+					{
+						var p = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+						if (p != null)
+						{
+							object? pv = p.GetValue(obj);
+							if (pv != null)
+							{
+								val = Convert.ToDouble(pv);
+								return true;
+							}
+						}
+
+						var f = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase);
+						if (f != null)
+						{
+							object? fv = f.GetValue(obj);
+							if (fv != null)
+							{
+								val = Convert.ToDouble(fv);
+								return true;
+							}
+						}
+					}
+					catch { }
+					return false;
+				}
+
+				bool hasX = TryGetNumber(vt, vectorObj, "X", out double x1) || TryGetNumber(vt, vectorObj, "x", out x1);
+				bool hasY = TryGetNumber(vt, vectorObj, "Y", out double y1) || TryGetNumber(vt, vectorObj, "y", out y1);
+				bool hasZ = TryGetNumber(vt, vectorObj, "Z", out double z1) || TryGetNumber(vt, vectorObj, "z", out z1);
+
+				// Standard 2D
+				if (hasX && hasY)
+				{
+					x = x1;
+					y = y1;
+					return true;
+				}
+
+				// 3D vector where map plane might be X/Z
+				if (hasX && hasZ)
+				{
+					x = x1;
+					y = z1;
+					return true;
+				}
+
+				// Last-ditch: if we only got Y/Z, treat Y as X and Z as Y
+				if (hasY && hasZ)
+				{
+					x = y1;
+					y = z1;
+					return true;
+				}
+			}
+			catch { }
+			return false;
+		}
 
         private QuestManager _questManager = new QuestManager();
         private string GeneratePrompt(Hero npc, string confirmationMessage = "")
@@ -759,7 +986,9 @@ namespace ChatAi
                     "chat_with_me_response",
                     "chat_with_me_response",
                     "chat_with_me_input",
-                    "Sure, let's chat."
+                    "Sure, let's chat.",
+                    null,
+                    null
                 );
 
                 // Player's Input Option
@@ -768,14 +997,29 @@ namespace ChatAi
                     "chat_with_me_input",
                     "chat_with_me_input",
                     "chat_with_me_processing",
-                    "Let me think...",
+					"Chat with text",
                     null,
+                    async () => { await HandlePlayerInput(); }
+                );
+
+                // Player's Speech Input Option (uses Player2 STT with timeout)
+                SafeAddPlayerLine(
+                    starter,
+                    "chat_with_me_input_speech",
+                    "chat_with_me_input",
+                    "chat_with_me_processing",
+                    "Speak using microphone",
+                    () =>
+                    {
+                        try
+                        {
+                            return ChatAiSettings.Instance.STTBackend?.SelectedValue == "Player2";
+                        }
+                        catch { return false; }
+                    },
                     async () =>
                     {
-     
-                        await HandlePlayerInput();
-
-
+                        await HandlePlayerSpeechInput();
                     }
                 );
 
@@ -824,16 +1068,7 @@ namespace ChatAi
                     "end_conversation",
                     "Goodbye.",
                     null,
-                    () =>
-                    {
-                        if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Azure")
-                        {
-                            LogMessage("Player ended the conversation. Cancelling playback...");
-                            AzureTextToSpeech.CancelPlayback();
-                        }
-
-
-                    }
+                    () => { if (ChatAiSettings.Instance.VoiceBackend?.SelectedValue == "Azure") { LogMessage("Player ended the conversation. Cancelling playback..."); AzureTextToSpeech.CancelPlayback(); } }
                 );
                 // Placeholder End State
                 SafeAddDialogLine(
@@ -842,11 +1077,7 @@ namespace ChatAi
                     "end_conversation",
                     "hero_main_options",
                     "Farewell. May your journeys be safe and prosperous.",
-                    () =>
-                    {
-                        
-                        return true;
-                    },
+                    () => { return true; },
                     null
                 );
             }
@@ -991,6 +1222,77 @@ namespace ChatAi
                 LogMessage("User input was empty. Ending conversation.");
                 return;
             }
+
+			await ProcessPlayerMessage(userInput);
+		}
+
+        // Microphone-driven input using Player2 STT and the configured timeout
+        private async Task HandlePlayerSpeechInput()
+        {
+            try
+            {
+                LogMessage("[STT] Starting Player2 STT flow...");
+                if (ChatAiSettings.Instance.STTBackend?.SelectedValue != "Player2")
+                {
+                    InformationManager.DisplayMessage(new InformationMessage("Player2 STT is not selected."));
+                    LogMessage("[STT] Aborted: STT backend is not Player2.");
+                    return;
+                }
+
+                var stt = new Player2SpeechToText();
+
+                string lang = ChatAiSettings.Instance.STTLanguageCode;
+                if (!string.IsNullOrWhiteSpace(lang))
+                {
+                    LogMessage($"[STT] Setting language: {lang}");
+                    _ = stt.SetLanguageAsync(lang);
+                }
+
+                int timeout = ChatAiSettings.Instance.STTTimeoutSeconds;
+                LogMessage($"[STT] Requesting start with timeout={timeout}s");
+                bool started = await stt.StartAsync(timeout);
+                if (!started)
+                {
+                    LogMessage("[STT] Start failed.");
+                    InformationManager.DisplayMessage(new InformationMessage("Could not start speech recognition."));
+                    return;
+                }
+
+                InformationManager.DisplayMessage(new InformationMessage($"Listening... (up to {timeout}s)"));
+
+                // Stop slightly BEFORE timeout to avoid Player2 discarding input
+                int stopDelayMs = Math.Max(1, timeout - 1) * 1000;
+                try { await Task.Delay(stopDelayMs); } catch { }
+
+                LogMessage("[STT] Stopping recognition...");
+				string recognized = await stt.StopAsync();
+				InformationManager.DisplayMessage(new InformationMessage("Stopped listening."));
+
+                if (string.IsNullOrWhiteSpace(recognized))
+                {
+                    LogMessage("[STT] No speech recognized.");
+                    InformationManager.DisplayMessage(new InformationMessage("No speech recognized."));
+                    MBTextManager.SetTextVariable("DYNAMIC_NPC_RESPONSE", "I did not hear anything.");
+                    return;
+                }
+
+                LogMessage($"[STT] Recognized: {recognized}");
+                await ProcessPlayerMessage(recognized);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"[STT] Error during speech input: {ex.Message}");
+                InformationManager.DisplayMessage(new InformationMessage("Speech input failed."));
+            }
+        }
+
+		private async Task ProcessPlayerMessage(string userInput)
+		{
+			try
+			{
+				LogMessage($"[UI] Processing player message: {userInput}");
+			}
+			catch { }
 
             Hero npc = Hero.OneToOneConversationHero;
             if (npc == null)
@@ -1332,8 +1634,8 @@ namespace ChatAi
         {
             try
             {
-                // Check if debug logging is enabled in the settings
-                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                // Settings may not be initialized yet on older Bannerlord versions.
+                if (!SettingsUtil.IsDebugLoggingEnabled())
                 {
                     return; // Skip logging if disabled
                 }

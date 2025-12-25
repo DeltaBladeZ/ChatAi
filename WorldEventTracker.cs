@@ -41,7 +41,8 @@ namespace ChatAi
         {
             try
             {
-                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                // Settings may not be initialized yet on older Bannerlord versions.
+                if (!SettingsUtil.IsDebugLoggingEnabled())
                 {
                     return;
                 }

@@ -10,6 +10,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using MCM.Common;
+using System.Reflection;
 
 namespace ChatAi
 {
@@ -21,8 +22,8 @@ namespace ChatAi
         {
             try
             {
-                // Check if debug logging is enabled in the settings
-                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                // Settings may not be initialized yet on older Bannerlord versions.
+                if (!SettingsUtil.IsDebugLoggingEnabled())
                 {
                     return; // Skip logging if disabled
                 }
@@ -145,6 +146,123 @@ namespace ChatAi
             );
         }
 
+        public void LogEnvironmentInfo()
+        {
+            try
+            {
+                // Avoid touching engine/module APIs during early boot unless debugging is explicitly enabled.
+                if (!SettingsUtil.IsDebugLoggingEnabled())
+                {
+                    return;
+                }
+
+                LogMessage("============================================================");
+                LogMessage("Environment & Versions");
+                LogMessage("============================================================");
+
+                var modAssembly = typeof(SubModule).Assembly;
+                var modAssemblyName = modAssembly.GetName();
+                LogMessage($"Mod Assembly: {modAssemblyName.Name}");
+                LogMessage($"Mod Version: {modAssemblyName.Version}");
+                LogMessage($"Assembly Location: {modAssembly.Location}");
+
+                LogMessage($"BasePath: {BasePath.Name}");
+                LogMessage($"OS: {Environment.OSVersion}");
+                LogMessage($"Process Architecture: {(Environment.Is64BitProcess ? "x64" : "x86")}");
+                LogMessage($".NET Runtime Version: {Environment.Version}");
+
+                // Core TaleWorlds assemblies
+                LogAssemblyBySimpleName("TaleWorlds.Core");
+                LogAssemblyBySimpleName("TaleWorlds.Library");
+                LogAssemblyBySimpleName("TaleWorlds.Engine");
+                LogAssemblyBySimpleName("TaleWorlds.MountAndBlade");
+                LogAssemblyBySimpleName("TaleWorlds.CampaignSystem");
+
+                // Common mod dependencies
+                LogAssemblyBySimpleName("Bannerlord.UIExtenderEx");
+                LogAssemblyBySimpleName("MCMv5");
+                LogAssemblyBySimpleName("MCM.UI.Adapter.MCMv5");
+                LogAssemblyBySimpleName("Lib.Harmony");
+                LogAssemblyBySimpleName("Microsoft.CognitiveServices.Speech.csharp");
+                LogAssemblyBySimpleName("NAudio");
+
+                // List modules with id/version when available
+                try
+                {
+                    var allModules = ModuleHelper.GetModules();
+                    LogMessage("------------------------------------------------------------");
+                    LogMessage("Active Modules (with Id/Version if available):");
+                    foreach (var module in allModules)
+                    {
+                        string name = SafeGetProperty(module, "Name");
+                        string id = SafeGetProperty(module, "Id");
+                        string version = SafeGetProperty(module, "Version");
+                        LogMessage($"- {name} | Id={id} | Version={version}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogMessage($"[WARN] Failed to enumerate modules with metadata: {ex.Message}");
+                }
+
+                LogMessage("============================================================");
+                LogMessage("Environment logging complete.");
+                LogMessage("============================================================");
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Error logging environment info: {ex.Message}");
+            }
+        }
+
+        public void DumpDiagnostics()
+        {
+            // Only dump when debugging is enabled; otherwise this can still be invoked manually later.
+            if (!SettingsUtil.IsDebugLoggingEnabled())
+            {
+                return;
+            }
+
+            LogEnvironmentInfo();
+            LogAllSettings();
+        }
+
+        private void LogAssemblyBySimpleName(string simpleName)
+        {
+            try
+            {
+                var asm = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => string.Equals(a.GetName().Name, simpleName, StringComparison.OrdinalIgnoreCase));
+                if (asm != null)
+                {
+                    var name = asm.GetName();
+                    LogMessage($"Assembly: {name.Name} | Version={name.Version}");
+                }
+                else
+                {
+                    LogMessage($"Assembly: {simpleName} | not loaded");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"Assembly lookup error for {simpleName}: {ex.Message}");
+            }
+        }
+
+        private string SafeGetProperty(object obj, string propertyName)
+        {
+            try
+            {
+                var prop = obj.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var value = prop?.GetValue(obj)?.ToString();
+                return string.IsNullOrWhiteSpace(value) ? "n/a" : value;
+            }
+            catch
+            {
+                return "n/a";
+            }
+        }
+
         // check if the mod is steam version or nexus version by checking the path
         public bool IsSteamVersion()
         {
@@ -157,6 +275,12 @@ namespace ChatAi
 
             try
             {
+                // Avoid touching settings during early boot unless debugging is explicitly enabled.
+                if (!SettingsUtil.IsDebugLoggingEnabled())
+                {
+                    return;
+                }
+
                 var settings = ChatAiSettings.Instance;
                 if (settings == null)
                 {
@@ -235,7 +359,8 @@ namespace ChatAi
             {
                 LogMessage($"Error logging settings: {ex.Message}");
                 LogMessage($"Stack trace: {ex.StackTrace}");
-                InformationManager.DisplayMessage(new InformationMessage("Error logging settings. Check logs for details."));
+                // Don't pop UI during boot; keep this silent unless debugging is enabled (which it is here).
+                try { InformationManager.DisplayMessage(new InformationMessage("Error logging settings. Check logs for details.")); } catch { }
             }
         }
 

@@ -170,7 +170,7 @@ namespace ChatAi
         public int MaxHistoryLength { get; set; } = 5;
 
         // Version Section, show current mod version, then if press button open nexus mod page with version 
-        [SettingPropertyButton("Current Version: 0.2.4", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
+        [SettingPropertyButton("Current Version: 0.2.6", Content = "Check for updates", RequireRestart = false, HintText = "Click to check for updates on the Nexus Mods page.")]
         [SettingPropertyGroup("Version", GroupOrder = 10)]
         public Action CheckForUpdates { get; set; } = (() =>
         {
@@ -313,6 +313,42 @@ namespace ChatAi
             }
         });
 
+        [SettingPropertyButton("Dump Diagnostics (versions, env, settings)", Content = "Dump", RequireRestart = false, HintText = "Writes a full diagnostics dump to mod_log.txt for troubleshooting.")]
+        [SettingPropertyGroup("Debugging", GroupOrder = 8)]
+        public Action DumpDiagnostics { get; set; } = (() =>
+        {
+            try
+            {
+                var logger = new DebugModLogger();
+                logger.DumpDiagnostics();
+                InformationManager.DisplayMessage(new InformationMessage("Diagnostics written to mod_log.txt"));
+            }
+            catch (Exception ex)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"Error writing diagnostics: {ex.Message}"));
+            }
+        });
+
+        // UI Screen Debugging
+        [SettingPropertyBool("Enable UI Screen Debug Logs", RequireRestart = false, HintText = "When enabled, logs TopScreen changes and layer info to mod_log.txt.")]
+        [SettingPropertyGroup("Debugging", GroupOrder = 8)]
+        public bool EnableUIScreenDebugLogs { get; set; } = false;
+
+        [SettingPropertyButton("Log UI Screen Snapshot", Content = "Log Now", RequireRestart = false, HintText = "Immediately logs current TopScreen and any Gauntlet layers.")]
+        [SettingPropertyGroup("Debugging", GroupOrder = 8)]
+        public Action LogUIScreenSnapshot { get; set; } = (() =>
+        {
+            try
+            {
+                ChatBehavior.Instance?.LogTopScreenInfo("[SettingsButton]");
+                InformationManager.DisplayMessage(new InformationMessage("UI screen snapshot logged."));
+            }
+            catch (Exception ex)
+            {
+                InformationManager.DisplayMessage(new InformationMessage($"Error logging UI snapshot: {ex.Message}"));
+            }
+        });
+
         // Player2 Settings Group
         [SettingPropertyText("Player2 API URL", RequireRestart = false, HintText = "The URL for the Player2 API. Default is http://localhost:4315")]
         [SettingPropertyGroup("API Settings/Player2 Settings", GroupOrder = 1)]
@@ -384,6 +420,22 @@ namespace ChatAi
             }
         });
 
+        // STT Settings Group
+        [SettingPropertyDropdown("STT Backend", RequireRestart = false, HintText = "Select the backend to use for speech-to-text (voice input).")]
+        [SettingPropertyGroup("API Settings/STT Settings", GroupOrder = 2)]
+        public Dropdown<string> STTBackend { get; set; } = new Dropdown<string>(
+            new List<string> { "Player2", "Azure", "[None]" }, 0);
+
+        [SettingPropertyText("STT Language Code", RequireRestart = false, HintText = "Language code for speech recognition (e.g., en-US).")]
+        [SettingPropertyGroup("API Settings/STT Settings", GroupOrder = 2)]
+        public string STTLanguageCode { get; set; } = "en-US";
+
+        [SettingPropertyInteger("STT Timeout (seconds)", 5, 120, RequireRestart = false, HintText = "Maximum listening duration before auto-stopping recognition.")]
+        [SettingPropertyGroup("API Settings/STT Settings", GroupOrder = 2)]
+        public int STTTimeoutSeconds { get; set; } = 30;
+
+        
+
         // Player2 TTS Settings Group
         [SettingPropertyText("Player2 Male Voice ID", RequireRestart = false, HintText = "The ID of the voice to use for male NPCs. Leave empty to use default voice.")]
         [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 2)]
@@ -418,6 +470,38 @@ namespace ChatAi
         [SettingPropertyInteger("Player2 TTS Volume", 0, 100, RequireRestart = false, HintText = "The volume of the TTS voice (0 to 100).")]
         [SettingPropertyGroup("API Settings/Player2 TTS Settings", GroupOrder = 2)]
         public int Player2TTSVolume { get; set; } = 70;
+
+        // Dynamic Battles Settings (shown under API Settings/STT Settings)
+        [SettingPropertyBool("Enable Dynamic Battles", RequireRestart = false, HintText = "Master switch. When disabled, all Dynamic Battles features (input, overlay, STT, effects) are off.")]
+        [SettingPropertyGroup("API Settings/STT Settings/Dynamic Battles", GroupOrder = 20)]
+        public bool EnableDynamicBattles { get; set; } = true;
+
+        [SettingPropertyDropdown("Dynamic Battles Hotkey", RequireRestart = false, HintText = "Key to open Dynamic Battles text input.")]
+        [SettingPropertyGroup("API Settings/STT Settings/Dynamic Battles", GroupOrder = 20)]
+        public Dropdown<string> BattleInputHotkey { get; set; } = new Dropdown<string>(
+            new List<string> {
+                "A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+                "0","1","2","3","4","5","6","7","8","9",
+                "SPACE","ENTER","TAB"
+            },
+            37 // Default to "ENTER"
+        );
+
+        [SettingPropertyBool("Enable STT (Dynamic Battles)", RequireRestart = false, HintText = "Enables Dynamic Battles speech-to-text features (uses the selected STT backend).")]
+        [SettingPropertyGroup("API Settings/STT Settings/Dynamic Battles", GroupOrder = 20)]
+        public bool EnableBattleSTT { get; set; } = true;
+
+        [SettingPropertyBool("Dynamic Battles: STT on Hotkey", RequireRestart = false, HintText = "When enabled, pressing the Dynamic Battles hotkey will start speech-to-text when opening the text prompt.")]
+        [SettingPropertyGroup("API Settings/STT Settings/Dynamic Battles", GroupOrder = 20)]
+        public bool DynamicBattlesSttOnHotkey { get; set; } = true;
+
+        [SettingPropertyBool("Dynamic Battles: STT Always On", RequireRestart = false, HintText = "When enabled, speech-to-text runs continuously during battles. Speak an order anytime; no hotkey required.")]
+        [SettingPropertyGroup("API Settings/STT Settings/Dynamic Battles", GroupOrder = 20)]
+        public bool DynamicBattlesSttAlwaysOn { get; set; } = false;
+
+        [SettingPropertyInteger("STT Timeout (seconds)", 5, 120, RequireRestart = false, HintText = "Maximum listening duration for Dynamic Battles STT aways on before auto-stoping and repeating. Basically how long you have between each seprate order/speech you can make with stt always on.")]
+        [SettingPropertyGroup("API Settings/STT Settings/Dynamic Battles", GroupOrder = 20)]
+        public int BattleSTTTimeoutSeconds { get; set; } = 10;
 
 
     }

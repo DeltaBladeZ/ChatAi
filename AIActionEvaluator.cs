@@ -550,8 +550,8 @@ Return ONLY ""None"" if the player is clearly refusing or changing the subject.
         {
             try
             {
-                // Check if debug logging is enabled in the settings
-                if (!ChatAiSettings.Instance.EnableDebugLogging)
+                // Settings may not be initialized yet on older Bannerlord versions.
+                if (!SettingsUtil.IsDebugLoggingEnabled())
                 {
                     return; // Skip logging if disabled
                 }
